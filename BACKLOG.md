@@ -21,26 +21,27 @@ Releases are **batched**. Work lands on a feature branch, gets merged
       because flutter_launcher_icons adds a 16% inset that silently shrinks
       the mark.
 
-### To build
-- [ ] **Item model + storage.** App-internal JSON, no seeding, survives
-      updates. Nothing is ever auto-created or reset.
-- [ ] **Three item types**
-  - Time — exact, app knows.
-  - Usage — exact **target** number is the headline (`Rotation at 48,000`);
-    learned rate → projected date; asks for a hard reading at 90% of the
-    projection, which recalibrates. Learns the real interval after two logs.
-  - Inspect-on-cadence — never claims due, prompts you to look.
-- [ ] **The cluster.** Hero gauge for the most urgent item, arcs sweeping up
-      from zero on open, everything else as compact rows grouped by asset.
-- [ ] **Add / edit flow**, including assets (Jenny's RAV4, The House, Me).
-- [ ] **Links** — label + URL, opens in the browser (dealer booking, Amazon).
-- [ ] **Part numbers** — tap to copy.
-- [ ] **Text handoff.** Pick a recipient from contacts, per-item message
-      template with the numbers filled in, opens the SMS app prefilled.
-      **Never sends by itself.**
-- [ ] **Notifications** for time-based items and for the 90% ask.
-- [ ] **History tab** — what was done and when; feeds interval learning.
-- [ ] Mascot moods wired to the real worst-state on the panel.
+- [x] **Item model + storage** (`models.dart`, `store.dart`). App-internal
+      JSON, atomic write, no seeding. A corrupt read never presents as
+      "you have no items".
+- [x] **Three item types.** Time / usage / inspect, per above. An inspect
+      item is capped at amber and can NEVER go red — red means "past due"
+      and the app cannot know that about brake pads. A test enforces it.
+- [x] **The cluster.** Hero gauge, arcs sweeping up from zero, staggered
+      rows, status strip.
+- [x] **Add / edit flow** with assets.
+- [x] **Links** — label + URL, opens externally.
+- [x] **Part numbers** — tap to copy.
+- [x] **Text handoff.** Contact picker, template with {item} {asset}
+      {target} {due}, opens the SMS app prefilled. Never sends by itself.
+- [x] **Notifications** at 90%, rescheduled from scratch on every change,
+      inexact so no exact-alarm permission is needed.
+- [x] **History** — newest first, swipe to remove, feeds interval learning.
+
+### Still to build
+- [ ] Mascot moods wired to the real worst-state on the panel (he only
+      appears on the empty state today).
+- [ ] Reorder / group the cluster by asset rather than pure urgency.
 
 ---
 

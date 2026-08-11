@@ -20,6 +20,11 @@ dependencies:
   open_filex: ^4.5.0
   url_launcher: ^6.3.0
 
+  # --- the tracker ---
+  flutter_contacts: ^1.1.9          # pick who to text
+  flutter_local_notifications: ^19.4.2
+  timezone: ^0.10.0                 # required by scheduled notifications
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

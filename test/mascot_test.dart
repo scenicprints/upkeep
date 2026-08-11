@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:upkeep/app_state.dart';
 import 'package:upkeep/main.dart';
 import 'package:upkeep/mascot.dart';
 import 'package:upkeep/theme.dart';
@@ -7,7 +8,7 @@ import 'package:upkeep/theme.dart';
 void main() {
   testWidgets('the empty cluster shows the gremlin and no seeded items',
       (WidgetTester tester) async {
-    await tester.pumpWidget(const UpkeepApp());
+    await tester.pumpWidget(UpkeepApp(controller: UpkeepController()..loaded = true));
     await tester.pump(const Duration(milliseconds: 100));
 
     // The mascot is the empty state — if he ever stops rendering, the

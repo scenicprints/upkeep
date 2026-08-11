@@ -3,7 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'app_state.dart';
+import 'gauge.dart';
+import 'history_screen.dart';
+import 'item_detail.dart';
+import 'item_edit.dart';
 import 'mascot.dart';
+import 'models.dart';
+import 'notifications.dart';
+import 'summary.dart';
 import 'theme.dart';
 import 'updater.dart';
 
@@ -22,27 +30,52 @@ void main() {
   runApp(const UpkeepApp());
 }
 
-class UpkeepApp extends StatelessWidget {
-  const UpkeepApp({super.key});
+class UpkeepApp extends StatefulWidget {
+  /// Tests inject a ready-made controller so they don't depend on plugin
+  /// channels resolving inside a pump. Production leaves it null.
+  final UpkeepController? controller;
+
+  const UpkeepApp({super.key, this.controller});
+
+  @override
+  State<UpkeepApp> createState() => _UpkeepAppState();
+}
+
+class _UpkeepAppState extends State<UpkeepApp> {
+  late final UpkeepController _controller =
+      widget.controller ?? UpkeepController();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.controller == null) {
+      Notifications.init().then((_) => _controller.load());
+    }
+  }
+
+  @override
+  void dispose() {
+    // Only dispose what we made; an injected one belongs to the caller.
+    if (widget.controller == null) _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Upkeep',
-      debugShowCheckedModeBanner: false,
-      theme: buildTheme(),
-      home: const ClusterScreen(),
+    return UpkeepScope(
+      notifier: _controller,
+      child: MaterialApp(
+        title: 'Upkeep',
+        debugShowCheckedModeBanner: false,
+        theme: buildTheme(),
+        home: const ClusterScreen(),
+      ),
     );
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════
 // THE CLUSTER — home screen
-//
-// v0.1.0 ships it empty on purpose. Nothing is seeded, no sample items:
-// everything in here will be typed in by hand and must survive every
-// future update. This build's job is to prove the OTA path end to end
-// before there is any data worth losing.
 // ═══════════════════════════════════════════════════════════════════════
 
 class ClusterScreen extends StatefulWidget {
@@ -59,12 +92,12 @@ class _ClusterScreenState extends State<ClusterScreen> {
   void initState() {
     super.initState();
     // Silent check on launch — only interrupts if there's genuinely a
-    // newer release. Delayed so it never fights the first frame, and held
-    // so it can be cancelled if the screen goes away first.
+    // newer release. Held so it can be cancelled if the screen goes away.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _launchCheck = Timer(const Duration(milliseconds: 900), () {
         if (mounted) autoCheck(context);
       });
+      Notifications.requestPermission();
     });
   }
 
@@ -87,33 +120,42 @@ class _ClusterScreenState extends State<ClusterScreen> {
     return '${_days[n.weekday - 1]} ${_months[n.month - 1]} ${n.day}';
   }
 
-  void _soon(String what) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text('$what lands in the next update.')));
+  Future<void> _add() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute<void>(builder: (_) => const ItemEditScreen()),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final UpkeepController c = UpkeepScope.of(context);
+    final List<Item> items = c.ranked;
+
     return Scaffold(
       // No SafeArea around the whole column: the nav bar's background has to
       // run underneath the system bar while its LABELS stay above it, so each
       // end insets itself. See _nav().
       body: Column(
         children: <Widget>[
-          SafeArea(bottom: false, child: _header()),
-          const Expanded(child: _EmptyCluster()),
+          SafeArea(bottom: false, child: _header(c)),
+          Expanded(
+            child: !c.loaded
+                ? const SizedBox.shrink()
+                : items.isEmpty
+                    ? const _EmptyCluster()
+                    : _panel(c, items),
+          ),
           _nav(),
         ],
       ),
     );
   }
 
-  Widget _header() {
+  Widget _header(UpkeepController c) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
           Text('UPKEEP',
               style: eyebrow(size: 11, color: kTextDim)
@@ -127,6 +169,61 @@ class _ClusterScreenState extends State<ClusterScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  /// The panel proper: a status strip, the worst item as a hero, then
+  /// everything else as compact rows.
+  Widget _panel(UpkeepController c, List<Item> items) {
+    final Item hero = items.first;
+    final List<Item> rest = items.skip(1).toList();
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: <Widget>[
+        _statusStrip(c),
+        _HeroCard(item: hero, assetName: c.data.assetName(hero)),
+        if (rest.isNotEmpty) ...<Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 22, 16, 8),
+            child: Text('EVERYTHING ELSE', style: eyebrow()),
+          ),
+          for (int i = 0; i < rest.length; i++)
+            _ItemRow(
+              item: rest[i],
+              assetName: c.data.assetName(rest[i]),
+              delay: Duration(milliseconds: 90 + i * 70),
+            ),
+        ],
+      ],
+    );
+  }
+
+  Widget _statusStrip(UpkeepController c) {
+    final int overdue = c.countIn(GaugeState.overdue);
+    final int ready = c.countIn(GaugeState.ready);
+    final int ok = c.countIn(GaugeState.healthy);
+
+    Widget dot(Color col, String text) => Padding(
+          padding: const EdgeInsets.only(right: 14),
+          child: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(color: col, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(text, style: const TextStyle(fontSize: 11, color: kTextDim)),
+          ]),
+        );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 14),
+      child: Row(children: <Widget>[
+        if (overdue > 0) dot(kOverdue, '$overdue overdue'),
+        if (ready > 0) dot(kReady, '$ready ready'),
+        if (ok > 0) dot(kHealthy, '$ok on schedule'),
+      ]),
     );
   }
 
@@ -163,8 +260,14 @@ class _ClusterScreenState extends State<ClusterScreen> {
         child: Row(
           children: <Widget>[
             item('CLUSTER', active: true),
-            item('HISTORY', onTap: () => _soon('History')),
-            item('ADD', onTap: () => _soon('Adding items')),
+            item('HISTORY', onTap: () {
+              Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(
+                    builder: (_) => const HistoryScreen()),
+              );
+            }),
+            item('ADD', onTap: _add),
           ],
         ),
       ),
@@ -195,6 +298,138 @@ class _EmptyCluster extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13.5, color: kTextDim, height: 1.6),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+
+class _HeroCard extends StatelessWidget {
+  final Item item;
+  final String assetName;
+
+  const _HeroCard({required this.item, required this.assetName});
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime now = DateTime.now();
+    final GaugeState state = item.state(now);
+    final ItemSummary s = summarise(item, now);
+    final double pct = item.progress(now) * 100;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => openItem(context, item),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: panelBox(ready: state != GaugeState.healthy),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                if (assetName.isNotEmpty)
+                  Text(assetName.toUpperCase(), style: eyebrow()),
+                const SizedBox(height: 10),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: <Widget>[
+                    Gauge(
+                      progress: item.progress(now),
+                      state: state,
+                      size: 106,
+                      centreLabel: pct.isFinite ? pct.round().toString() : '0',
+                      centreCaption: s.caption,
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(
+                            item.name,
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w500,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(s.headline,
+                              style: mono(size: 13.5, color: kText)),
+                          const SizedBox(height: 4),
+                          Text(s.sub,
+                              style: mono(size: 11, color: kTextFaint)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ItemRow extends StatelessWidget {
+  final Item item;
+  final String assetName;
+  final Duration delay;
+
+  const _ItemRow({
+    required this.item,
+    required this.assetName,
+    required this.delay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime now = DateTime.now();
+    final GaugeState state = item.state(now);
+    final ItemSummary s = summarise(item, now);
+    final double pct = item.progress(now) * 100;
+
+    return InkWell(
+      onTap: () => openItem(context, item),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        child: Row(
+          children: <Widget>[
+            Gauge(
+              progress: item.progress(now),
+              state: state,
+              size: 34,
+              stroke: 4,
+              delay: delay,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(item.name,
+                      style: const TextStyle(fontSize: 13.5, color: kText)),
+                  const SizedBox(height: 2),
+                  Text(
+                    assetName.isEmpty
+                        ? s.headline
+                        : '${assetName.toUpperCase()} · ${s.headline}',
+                    style: mono(size: 10.5, color: kTextFaint),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 10),
+            Text('${pct.round()}%',
+                style: mono(size: 12, color: gaugeColor(state))),
           ],
         ),
       ),
