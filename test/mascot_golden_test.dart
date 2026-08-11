@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:upkeep/app_state.dart';
 import 'package:upkeep/main.dart';
 import 'package:upkeep/mascot.dart';
 import 'package:upkeep/theme.dart';
@@ -63,7 +64,7 @@ void main() {
     tester.view.devicePixelRatio = 3.0;
     addTearDown(tester.view.reset);
 
-    await tester.pumpWidget(const UpkeepApp());
+    await tester.pumpWidget(UpkeepApp(controller: UpkeepController()..loaded = true));
     await tester.pump(const Duration(milliseconds: 1500));
     await expectLater(
       find.byType(ClusterScreen),

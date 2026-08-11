@@ -20,10 +20,26 @@ dependencies:
   open_filex: ^4.5.0
   url_launcher: ^6.3.0
 
+  # --- the tracker ---
+  flutter_contacts: ^1.1.9          # pick who to text
+  flutter_local_notifications: ^19.4.2
+  timezone: ^0.10.0                 # required by scheduled notifications
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
+
+# Launcher icon. Regenerate the source art with `python tools/make_icon.py`,
+# then `dart run flutter_launcher_icons` to write the res/ folders.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/upkeep_icon.png"
+  adaptive_icon_background: "#0A0C0F"
+  adaptive_icon_foreground: "assets/icon/upkeep_icon_fg.png"
+  min_sdk_android: 23
