@@ -15,6 +15,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history so the ANNOTATED tag object comes along. At the
+          # default depth the tag arrives as a bare ref pointing at the
+          # commit, and `git tag -l --format=%(contents)` silently falls
+          # back to the commit message — which then ships as "What's New".
+          fetch-depth: 0
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
