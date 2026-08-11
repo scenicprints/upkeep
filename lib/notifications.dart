@@ -81,8 +81,12 @@ class Notifications {
       final String assetName = data.assetName(item);
       final String where = assetName.isEmpty ? '' : ' · $assetName';
       final String body = switch (item.kind) {
-        ItemKind.usage =>
-          "Should be near ${_targetText(item)}. What's the odometer?",
+        // Asking for the odometer is only useful when MILEAGE is what's
+        // about to trip. If the months limit gets there first, the reading
+        // is beside the point.
+        ItemKind.usage => item.monthsLeads(fireAt)
+            ? 'Coming due on time — ${item.intervalMonths} months.'
+            : "Should be near ${_targetText(item)}. What's the odometer?",
         ItemKind.inspect => 'Worth a look.',
         ItemKind.time => 'Coming due.',
       };
@@ -118,16 +122,31 @@ class Notifications {
         if (done == null || days == null || days <= 0) return null;
         return done.add(Duration(days: (days * 0.9).round()));
       case ItemKind.usage:
-        final DateTime? due = item.dueDate(now);
+        // Whichever limit trips first gets the notification.
+        DateTime? byMileage;
         final double? span = item.intervalUnits;
         final double? rate = item.unitsPerDay;
-        if (due == null || span == null || rate == null || rate <= 0) {
-          return null;
+        final DateTime? mileageDue = item.dueDate(now);
+        if (mileageDue != null && span != null && rate != null && rate > 0) {
+          // 90% of the way there is one-tenth of an interval before the
+          // projected date.
+          final double leadDays = span * 0.10 / rate;
+          byMileage =
+              mileageDue.subtract(Duration(minutes: (leadDays * 1440).round()));
         }
-        // 90% of the way there is one-tenth of an interval before the
-        // projected date.
-        final double leadDays = span * 0.10 / rate;
-        return due.subtract(Duration(minutes: (leadDays * 1440).round()));
+
+        DateTime? byMonths;
+        final DateTime? done = item.lastDoneAt;
+        final DateTime? monthsDue = item.monthsDueDate;
+        if (done != null && monthsDue != null) {
+          final int span90 =
+              (monthsDue.difference(done).inMinutes * 0.9).round();
+          byMonths = done.add(Duration(minutes: span90));
+        }
+
+        if (byMileage == null) return byMonths;
+        if (byMonths == null) return byMileage;
+        return byMileage.isBefore(byMonths) ? byMileage : byMonths;
     }
   }
 

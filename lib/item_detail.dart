@@ -156,7 +156,7 @@ class ItemDetailScreen extends StatelessWidget {
         item.target == null
             ? '—'
             : '${fmtNum(item.target!)} ${item.unit}',
-        emphasise: true,
+        emphasise: !item.monthsLeads(now),
       ));
       rows.add(_factRow(
         'Interval',
@@ -164,6 +164,17 @@ class ItemDetailScreen extends StatelessWidget {
             ? '—'
             : 'every ${fmtNum(item.intervalUnits!)} ${item.unit}',
       ));
+      if (item.intervalMonths != null) {
+        final DateTime? byMonths = item.monthsDueDate;
+        rows.add(_factRow(
+          'Or after',
+          byMonths == null
+              ? '${item.intervalMonths} months'
+              : '${item.intervalMonths} months · ${fmtDate(byMonths)}',
+          // Highlight whichever limit is actually going to trip first.
+          emphasise: item.monthsLeads(now),
+        ));
+      }
       final Reading? last = item.latestReading;
       rows.add(_factRow(
         'Last reading',

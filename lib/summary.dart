@@ -67,21 +67,29 @@ GaugeStateName _stateName(Item item, DateTime n) {
 ItemSummary _usage(Item item, DateTime n) {
   final double? target = item.target;
   final String caption = _captionFor(item, n);
+  final DateTime? byMonths = item.monthsDueDate;
 
   if (target == null) {
+    final String every = item.intervalUnits == null
+        ? 'No interval set'
+        : 'Every ${fmtNum(item.intervalUnits!)} ${item.unit}';
     return ItemSummary(
-      headline: item.intervalUnits == null
-          ? 'No interval set'
-          : 'Every ${fmtNum(item.intervalUnits!)} ${item.unit}',
+      headline: item.intervalMonths == null
+          ? every
+          : '$every or ${_months(item.intervalMonths!)}',
       sub: 'Log it once to set the target.',
       caption: caption,
     );
   }
 
-  final String headline = '${fmtNum(target)} ${item.unit}';
+  // Both limits belong in the headline: "whichever comes first" means both
+  // numbers are things you'd check. Both are exact — the months date is
+  // calendar arithmetic off the last service, not a projection.
+  final String headline = byMonths == null
+      ? '${fmtNum(target)} ${item.unit}'
+      : '${fmtNum(target)} ${item.unit} or ${fmtDate(byMonths)}';
 
-  // Sub-line: where we think you are, and roughly when. Both are guesses,
-  // both marked.
+  // Sub-line: where we think you are, and roughly when. Guesses, marked.
   final double? est = item.estimatedReading(n);
   final DateTime? due = item.dueDate(n);
   final List<String> bits = <String>[];
@@ -96,7 +104,14 @@ ItemSummary _usage(Item item, DateTime n) {
   }
   if (due != null) {
     final int days = due.difference(n).inDays;
-    bits.add(days <= 0 ? 'now' : '~${fmtRelativeDays(days)}');
+    // Only the mileage side is a guess. When the calendar is what trips
+    // first, the date is exact and the "~" would be a lie.
+    final bool exact = item.monthsLeads(n);
+    final String when = days <= 0 ? 'now' : fmtRelativeDays(days);
+    bits.add(exact ? when : (days <= 0 ? 'now' : '~$when'));
+  }
+  if (byMonths != null && item.monthsLeads(n)) {
+    bits.add('months first');
   }
   if (bits.isEmpty) {
     bits.add('Add a reading and it starts guessing the date.');
@@ -108,6 +123,8 @@ ItemSummary _usage(Item item, DateTime n) {
     caption: caption,
   );
 }
+
+String _months(int m) => m == 1 ? '1 month' : '$m months';
 
 ItemSummary _time(Item item, DateTime n) {
   final DateTime? due = item.dueDate(n);

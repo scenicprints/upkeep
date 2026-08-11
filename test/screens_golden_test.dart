@@ -61,6 +61,7 @@ UpkeepController demoController() {
     assetId: car.id,
     kind: ItemKind.usage,
     intervalUnits: 5000,
+    intervalMonths: 6, // whichever comes first
     unit: 'mi',
     log: <ServiceLog>[
       ServiceLog(id: 'l1', at: ago(120), reading: 38410),

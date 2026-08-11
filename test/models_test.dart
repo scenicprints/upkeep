@@ -152,6 +152,112 @@ void main() {
     });
   });
 
+  group('mileage OR months — whichever comes first', () {
+    Item both({double interval = 5000, int months = 6}) => Item(
+          id: 'i',
+          name: 'Oil change',
+          assetId: 'a',
+          kind: ItemKind.usage,
+          intervalUnits: interval,
+          intervalMonths: months,
+          unit: 'mi',
+          log: <ServiceLog>[
+            ServiceLog(id: '1', at: day(0), reading: 40000),
+          ],
+          readings: <Reading>[Reading(at: day(0), value: 40000)],
+        );
+
+    test('months drives the gauge when the car barely moves', () {
+      final Item i = both();
+      // 200 miles in five months — mileage is nowhere near, the calendar is.
+      i.readings.add(Reading(at: day(150), value: 40200));
+      expect(i.usageProgress(day(150)), closeTo(0.04, 0.01));
+      expect(i.monthsProgress(day(150)), greaterThan(0.8));
+      expect(i.progress(day(150)), i.monthsProgress(day(150)));
+      expect(i.monthsLeads(day(150)), isTrue);
+    });
+
+    test('mileage drives it when the car gets hammered', () {
+      final Item i = both();
+      i.readings.add(Reading(at: day(30), value: 44700)); // 4,700 in a month
+      expect(i.usageProgress(day(30)), closeTo(0.94, 0.01));
+      expect(i.monthsProgress(day(30)), lessThan(0.2));
+      expect(i.progress(day(30)), closeTo(0.94, 0.01));
+      expect(i.monthsLeads(day(30)), isFalse);
+    });
+
+    test('the due date is the earlier of the two', () {
+      final Item i = both();
+      i.readings.add(Reading(at: day(100), value: 40500)); // 5 mi/day
+      // At 5 mi/day, 4,500 more miles is ~900 days away. Six months isn't.
+      final DateTime? due = i.dueDate(day(100));
+      expect(due, isNotNull);
+      expect(due!.isBefore(day(200)), isTrue);
+      expect(due, i.monthsDueDate);
+    });
+
+    test('goes overdue on the calendar even with no miles driven', () {
+      final Item i = both();
+      expect(i.state(day(200)), GaugeState.overdue);
+    });
+
+    test('with no months limit it behaves exactly as before', () {
+      final Item i = both(months: 0)..intervalMonths = null;
+      expect(i.monthsProgress(day(400)), 0);
+      expect(i.progress(day(400)), i.usageProgress(day(400)));
+      expect(i.monthsLeads(day(400)), isFalse);
+    });
+
+    test('it never asks for an odometer when the calendar is what trips', () {
+      final Item i = both();
+      i.readings.add(Reading(at: day(150), value: 40200));
+      expect(i.progress(day(175)), greaterThan(0.9));
+      // Mileage is at 4% — an odometer reading would tell it nothing.
+      expect(i.needsReading(day(175)), isFalse);
+    });
+
+    test('the headline carries both limits', () {
+      final Item i = both();
+      final ItemSummary s = summarise(i, day(10));
+      expect(s.headline, contains('45,000 mi'));
+      expect(s.headline, contains(' or '));
+    });
+
+    test('the months date is exact, so it is not marked as a guess', () {
+      final Item i = both();
+      i.readings.add(Reading(at: day(150), value: 40200));
+      final ItemSummary s = summarise(i, day(150));
+      expect(s.sub, contains('months first'));
+    });
+
+    test('survives a round trip', () {
+      final Item back = Item.fromJson(both(months: 6).toJson());
+      expect(back.intervalMonths, 6);
+      expect(back.monthsDueDate, isNotNull);
+    });
+  });
+
+  group('calendar month arithmetic', () {
+    test('six months from Feb 2 is Aug 2, not plus-180-days', () {
+      expect(addMonths(DateTime(2026, 2, 2), 6), DateTime(2026, 8, 2));
+    });
+
+    test('rolls the year over', () {
+      expect(addMonths(DateTime(2026, 10, 15), 6), DateTime(2027, 4, 15));
+      expect(addMonths(DateTime(2026, 12, 1), 1), DateTime(2027, 1, 1));
+    });
+
+    test('clamps to the last day of a shorter month', () {
+      // Aug 31 + 6 months is Feb 28, not a rolled-over Mar 3.
+      expect(addMonths(DateTime(2026, 8, 31), 6), DateTime(2027, 2, 28));
+      expect(addMonths(DateTime(2026, 1, 31), 1), DateTime(2026, 2, 28));
+    });
+
+    test('handles a leap year', () {
+      expect(addMonths(DateTime(2027, 8, 31), 6), DateTime(2028, 2, 29));
+    });
+  });
+
   group('the 90% ask', () {
     test('asks once the guess says close and the reading is stale', () {
       final Item i = usageItem(

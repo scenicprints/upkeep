@@ -38,10 +38,24 @@ Releases are **batched**. Work lands on a feature branch, gets merged
       inexact so no exact-alarm permission is needed.
 - [x] **History** — newest first, swipe to remove, feeds interval learning.
 
-### Still to build
-- [ ] Mascot moods wired to the real worst-state on the panel (he only
-      appears on the empty state today).
-- [ ] Reorder / group the cluster by asset rather than pure urgency.
+---
+
+## v0.3.0 — batch in progress (branch `feature/batch-v0.3`)
+
+### Done
+- [x] **Mileage OR months, whichever comes first.** A usage item takes an
+      optional second limit in months. Whichever is further along drives the
+      gauge, so a car that barely moves still comes due on time. Both limits
+      show in the headline (`43,410 mi or Oct 13`). Calendar arithmetic, not
+      30-day approximations — six months from Aug 31 is Feb 28. The 90% ask
+      and the notification only mention the odometer when MILEAGE is the
+      limit about to trip; if the calendar gets there first, a reading tells
+      you nothing.
+
+### Candidates
+- [ ] Mascot moods wired to the real worst-state on the panel.
+- [ ] Group the cluster by asset rather than pure urgency.
+- [ ] Export / backup.
 
 ---
 

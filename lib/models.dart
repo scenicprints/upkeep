@@ -151,6 +151,14 @@ class Item {
   /// usage: how many units between services. 5000 miles.
   double? intervalUnits;
 
+  /// usage: an optional SECOND limit in months — "every 5,000 miles or 6
+  /// months, whichever comes first". Whichever limit is further along drives
+  /// the gauge, so a car that barely moves still comes due on time.
+  ///
+  /// Months rather than days on purpose: "6 months from Feb 2" means Aug 2,
+  /// not Feb 2 plus 180 days.
+  int? intervalMonths;
+
   /// Unit label for a usage item: "mi", "hr".
   String unit;
 
@@ -177,6 +185,7 @@ class Item {
     required this.kind,
     this.intervalDays,
     this.intervalUnits,
+    this.intervalMonths,
     this.unit = 'mi',
     List<Reading>? readings,
     List<ServiceLog>? log,
@@ -201,6 +210,7 @@ class Item {
         'kind': kind.name,
         'interval_days': intervalDays,
         'interval_units': intervalUnits,
+        'interval_months': intervalMonths,
         'unit': unit,
         'readings': readings.map((Reading r) => r.toJson()).toList(),
         'log': log.map((ServiceLog l) => l.toJson()).toList(),
@@ -224,6 +234,7 @@ class Item {
         ),
         intervalDays: (j['interval_days'] as num?)?.toInt(),
         intervalUnits: (j['interval_units'] as num?)?.toDouble(),
+        intervalMonths: (j['interval_months'] as num?)?.toInt(),
         unit: (j['unit'] as String?) ?? 'mi',
         readings: ((j['readings'] as List<dynamic>?) ?? const <dynamic>[])
             .map((dynamic e) => Reading.fromJson(e as Map<String, dynamic>))
@@ -312,7 +323,49 @@ class Item {
 
   // ── progress ─────────────────────────────────────────────────────
 
+  /// The calendar date the months limit lands on, if there is one.
+  /// Calendar arithmetic, not 30-day approximations.
+  DateTime? get monthsDueDate {
+    final DateTime? done = lastDoneAt;
+    final int? months = intervalMonths;
+    if (done == null || months == null || months <= 0) return null;
+    return addMonths(done, months);
+  }
+
+  /// How far through the MILEAGE limit, ignoring any months limit.
+  double usageProgress([DateTime? now]) {
+    if (kind != ItemKind.usage) return 0;
+    final double? base = lastDoneReading;
+    final double? span = intervalUnits;
+    if (base == null || span == null || span <= 0) return 0;
+    final double? est = estimatedReading(now ?? DateTime.now());
+    if (est == null) return 0;
+    return math.max(0, (est - base) / span);
+  }
+
+  /// How far through the MONTHS limit, ignoring mileage.
+  double monthsProgress([DateTime? now]) {
+    final DateTime n = now ?? DateTime.now();
+    final DateTime? done = lastDoneAt;
+    final DateTime? due = monthsDueDate;
+    if (done == null || due == null) return 0;
+    final double span = due.difference(done).inMinutes / 1440.0;
+    if (span <= 0) return 0;
+    return math.max(0, (n.difference(done).inMinutes / 1440.0) / span);
+  }
+
+  /// True when the months limit is the one that will trip first. Only
+  /// meaningful on a usage item that has both.
+  bool monthsLeads([DateTime? now]) =>
+      kind == ItemKind.usage &&
+      intervalMonths != null &&
+      monthsProgress(now) > usageProgress(now);
+
   /// 0..1+ — how much of the interval is used up. Past 1.0 is overdue.
+  ///
+  /// A usage item with a months limit takes whichever is further along:
+  /// that's what "every 5,000 miles or 6 months, whichever comes first"
+  /// means. A car that barely gets driven still comes due on time.
   double progress([DateTime? now]) {
     final DateTime n = now ?? DateTime.now();
     switch (kind) {
@@ -324,12 +377,7 @@ class Item {
         final double elapsed = n.difference(done).inMinutes / 1440.0;
         return math.max(0, elapsed / days);
       case ItemKind.usage:
-        final double? base = lastDoneReading;
-        final double? span = intervalUnits;
-        if (base == null || span == null || span <= 0) return 0;
-        final double? est = estimatedReading(n);
-        if (est == null) return 0;
-        return math.max(0, (est - base) / span);
+        return math.max(usageProgress(n), monthsProgress(n));
     }
   }
 
@@ -359,13 +407,22 @@ class Item {
         if (done == null || days == null) return null;
         return done.add(Duration(days: days));
       case ItemKind.usage:
+        // Whichever comes first. Either side may be unknown — a mileage
+        // date needs a learned rate, and the months limit is optional.
+        final DateTime? byMonths = monthsDueDate;
+        DateTime? byMileage;
         final double? t = target;
         final double? est = estimatedReading(n);
         final double? rate = unitsPerDay;
-        if (t == null || est == null || rate == null || rate <= 0) return null;
-        final double remaining = t - est;
-        if (remaining <= 0) return n;
-        return n.add(Duration(minutes: (remaining / rate * 1440).round()));
+        if (t != null && est != null && rate != null && rate > 0) {
+          final double remaining = t - est;
+          byMileage = remaining <= 0
+              ? n
+              : n.add(Duration(minutes: (remaining / rate * 1440).round()));
+        }
+        if (byMileage == null) return byMonths;
+        if (byMonths == null) return byMileage;
+        return byMileage.isBefore(byMonths) ? byMileage : byMonths;
     }
   }
 
@@ -376,7 +433,10 @@ class Item {
     if (kind != ItemKind.usage) return false;
     if (lastDoneReading == null || intervalUnits == null) return false;
     final DateTime n = now ?? DateTime.now();
-    if (progress(n) < 0.9) return false;
+    // Deliberately usageProgress, not progress: if the MONTHS limit is what's
+    // about to trip, the odometer is beside the point and asking for it is
+    // just noise.
+    if (usageProgress(n) < 0.9) return false;
     final Reading? last = latestReading;
     if (last == null) return true;
     return n.difference(last.at).inDays >= 2;
@@ -437,6 +497,22 @@ class Item {
 // ═══════════════════════════════════════════════════════════════════════
 // FORMATTING
 // ═══════════════════════════════════════════════════════════════════════
+
+/// Calendar month arithmetic. Six months from Aug 31 is Feb 28/29, not a
+/// rolled-over Mar 3 — clamps to the last valid day of the target month.
+DateTime addMonths(DateTime d, int n) {
+  final int total = d.month - 1 + n;
+  final int year = d.year + (total >= 0 ? total ~/ 12 : ((total - 11) ~/ 12));
+  final int month = total % 12 < 0 ? total % 12 + 12 : total % 12;
+  final int lastDay = DateTime(year, month + 2, 0).day;
+  return DateTime(
+    year,
+    month + 1,
+    math.min(d.day, lastDay),
+    d.hour,
+    d.minute,
+  );
+}
 
 const List<String> kMonthsShort = <String>[
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
