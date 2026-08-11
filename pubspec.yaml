@@ -1,0 +1,29 @@
+name: upkeep
+description: "Upkeep — maintenance tracker. Every tracked thing is a gauge."
+publish_to: 'none'
+
+# Single source of truth for the app version. MUST match the git tag that
+# publish.ps1 pushes, because the in-app updater compares this to the tag.
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- in-app OTA updater (see lib/updater.dart) ---
+  http: ^1.2.2
+  package_info_plus: ^8.0.2
+  path_provider: ^2.1.4
+  open_filex: ^4.5.0
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
