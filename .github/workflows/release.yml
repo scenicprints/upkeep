@@ -16,11 +16,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # Full history so the ANNOTATED tag object comes along. At the
-          # default depth the tag arrives as a bare ref pointing at the
-          # commit, and `git tag -l --format=%(contents)` silently falls
-          # back to the commit message — which then ships as "What's New".
           fetch-depth: 0
+          # checkout fetches with --no-tags and then recreates the trigger
+          # ref itself, which makes the annotated tag LIGHTWEIGHT on the
+          # runner. `%(contents)` then silently falls back to the commit
+          # message and that ships as "What's New". Both this and the
+          # explicit re-fetch below are needed.
+          fetch-tags: true
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -78,7 +80,16 @@ jobs:
           cp build/app/outputs/flutter-apk/app-release.apk "upkeep-${VERSION}.apk"
 
       - name: Extract release notes from tag message
-        run: git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > RELEASE_NOTES.txt
+        run: |
+          # Force the real annotated tag object down, overwriting whatever
+          # checkout left behind.
+          git fetch --force origin \
+            "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}"
+          test "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" \
+            || { echo "::error::$GITHUB_REF_NAME is not an annotated tag — release notes would be the commit message. Tag with 'git tag -a'."; exit 1; }
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > RELEASE_NOTES.txt
+          echo "--- release notes ---"; cat RELEASE_NOTES.txt
+          test -s RELEASE_NOTES.txt || { echo "::error::empty release notes"; exit 1; }
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
