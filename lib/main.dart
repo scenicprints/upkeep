@@ -9,10 +9,14 @@ import 'updater.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Android 15+ forces edge-to-edge regardless, and ignores
+  // systemNavigationBarColor. Opt in explicitly so the insets are reported
+  // properly and the app paints its own background behind the bars.
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
-    systemNavigationBarColor: kNavBg,
+    systemNavigationBarColor: Colors.transparent,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
   runApp(const UpkeepApp());
@@ -92,15 +96,15 @@ class _ClusterScreenState extends State<ClusterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Column(
-          children: <Widget>[
-            _header(),
-            const Expanded(child: _EmptyCluster()),
-            _nav(),
-          ],
-        ),
+      // No SafeArea around the whole column: the nav bar's background has to
+      // run underneath the system bar while its LABELS stay above it, so each
+      // end insets itself. See _nav().
+      body: Column(
+        children: <Widget>[
+          SafeArea(bottom: false, child: _header()),
+          const Expanded(child: _EmptyCluster()),
+          _nav(),
+        ],
       ),
     );
   }
@@ -149,13 +153,20 @@ class _ClusterScreenState extends State<ClusterScreen> {
         color: kNavBg,
         border: Border(top: BorderSide(color: kHairline, width: 0.5)),
       ),
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewPadding.bottom),
-      child: Row(
-        children: <Widget>[
-          item('CLUSTER', active: true),
-          item('HISTORY', onTap: () => _soon('History')),
-          item('ADD', onTap: () => _soon('Adding items')),
-        ],
+      // SafeArea INSIDE the coloured container: the background fills the
+      // gesture-bar strip while the labels are pushed clear of it. Reading
+      // MediaQuery padding by hand here is what put the labels under the
+      // system nav bar — under Android 15's forced edge-to-edge that value
+      // can't be trusted from an ancestor context.
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: <Widget>[
+            item('CLUSTER', active: true),
+            item('HISTORY', onTap: () => _soon('History')),
+            item('ADD', onTap: () => _soon('Adding items')),
+          ],
+        ),
       ),
     );
   }
