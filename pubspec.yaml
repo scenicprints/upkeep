@@ -4,7 +4,7 @@ publish_to: 'none'
 
 # Single source of truth for the app version. MUST match the git tag that
 # publish.ps1 pushes, because the in-app updater compares this to the tag.
-version: 0.4.0+6
+version: 0.5.0+7
 
 environment:
   sdk: ^3.12.2
