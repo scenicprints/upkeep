@@ -155,10 +155,21 @@ class _ClusterScreenState extends State<ClusterScreen> {
   }
 
   Widget _header(UpkeepController c) {
+    // The gremlin rides in the header, sized down. He carries no
+    // information of his own — the counts below already say it — but his
+    // eyes take the worst state on the panel, so the screen has a pulse
+    // before you've read a word of it.
+    final MascotMood mood = moodFor(
+      c.worstState,
+      anyItems: c.data.liveItems.isNotEmpty,
+    );
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 8, 4),
+      padding: const EdgeInsets.fromLTRB(10, 6, 8, 0),
       child: Row(
         children: <Widget>[
+          Mascot(size: 42, mood: mood),
+          const SizedBox(width: 4),
           Text('UPKEEP',
               style: eyebrow(size: 11, color: kTextDim)
                   .copyWith(letterSpacing: 2.4)),

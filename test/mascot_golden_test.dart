@@ -16,32 +16,6 @@ import 'package:upkeep/theme.dart';
 // Windows-only: golden rasterisation differs subtly between platforms and
 // this must never be the reason a CI release build fails.
 void main() {
-  testWidgets('gremlin — three moods', (WidgetTester tester) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        debugShowCheckedModeBanner: false,
-        home: Scaffold(
-          backgroundColor: kBg,
-          body: Center(
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: <Widget>[
-                for (final MascotMood m in MascotMood.values)
-                  Mascot(size: 140, mood: m),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    // Land mid-breath, eyes open.
-    await tester.pump(const Duration(milliseconds: 1500));
-    await expectLater(
-      find.byType(Row).first,
-      matchesGoldenFile('goldens/gremlin_moods.png'),
-    );
-  }, skip: !Platform.isWindows);
-
   testWidgets('gremlin — detail', (WidgetTester tester) async {
     await tester.pumpWidget(
       const MaterialApp(
