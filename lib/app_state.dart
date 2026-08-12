@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'fuelwise.dart';
 import 'models.dart';
 import 'notifications.dart';
 import 'store.dart';
@@ -185,6 +186,52 @@ class UpkeepController extends ChangeNotifier {
     if (countIn(GaugeState.overdue) > 0) return GaugeState.overdue;
     if (countIn(GaugeState.ready) > 0) return GaugeState.ready;
     return GaugeState.healthy;
+  }
+
+  // ── FuelWise ─────────────────────────────────────────────────────
+
+  List<Asset> get linkedAssets => data.liveAssets
+      .where((Asset a) => a.fuelwiseVehicleId != null)
+      .toList();
+
+  Future<void> linkAsset(Asset asset, String? vehicleId) async {
+    asset.fuelwiseVehicleId = vehicleId;
+    asset.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await _commit();
+  }
+
+  /// Unlinking pulls back only the readings the bridge added. Anything you
+  /// typed stays — losing your own numbers because a link was removed would
+  /// be indefensible.
+  Future<int> unlinkAsset(Asset asset) async {
+    final int removed = removeImported(asset);
+    asset.fuelwiseVehicleId = null;
+    asset.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await _commit();
+    return removed;
+  }
+
+  /// Pulls fill-ups into every linked asset. Additive and idempotent, so
+  /// it's safe on every launch.
+  Future<ImportResult> importFromFuelWise(FuelWiseSnapshot snap) async {
+    int added = 0, skipped = 0;
+    for (final Asset a in linkedAssets) {
+      final ImportResult r =
+          importFills(a, snap.forVehicle(a.fuelwiseVehicleId!));
+      added += r.added;
+      skipped += r.skipped;
+    }
+    if (added > 0) await _commit();
+    return ImportResult(added: added, skipped: skipped);
+  }
+
+  /// Silent refresh on launch. Never surfaces an error — if FuelWise isn't
+  /// reachable the app simply carries on with what it already has.
+  Future<void> refreshFuelWiseQuietly() async {
+    if (linkedAssets.isEmpty) return;
+    if (!await FuelWise.connected) return;
+    final FuelWiseResult res = await FuelWise.fetch();
+    if (res.ok) await importFromFuelWise(res.snapshot!);
   }
 
   // ── backup ───────────────────────────────────────────────────────

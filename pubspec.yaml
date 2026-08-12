@@ -25,6 +25,7 @@ dependencies:
   flutter_local_notifications: ^19.4.2
   timezone: ^0.10.0                 # required by scheduled notifications
   share_plus: ^10.1.4               # hand a backup file to Drive/Gmail/etc
+  flutter_secure_storage: ^9.2.2    # the FuelWise read token, never in git
 
 dev_dependencies:
   flutter_test:
