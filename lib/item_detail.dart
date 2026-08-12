@@ -6,6 +6,7 @@ import 'app_state.dart';
 import 'gauge.dart';
 import 'item_edit.dart';
 import 'models.dart';
+import 'readings_screen.dart';
 import 'summary.dart';
 import 'theme.dart';
 
@@ -41,8 +42,10 @@ class ItemDetailScreen extends StatelessWidget {
     }
 
     final DateTime now = DateTime.now();
-    final GaugeState state = item.state(now);
-    final ItemSummary s = summarise(item, now);
+    final Tracked t = c.track(item);
+    final Asset? asset = t.asset;
+    final GaugeState state = t.state(now);
+    final ItemSummary s = summarise(t, now);
     final String assetName = c.data.assetName(item);
     final double? suggestion = item.intervalSuggestion;
 
@@ -61,12 +64,12 @@ class ItemDetailScreen extends StatelessWidget {
                   const SizedBox(height: 6),
                   Center(
                     child: Gauge(
-                      progress: item.progress(now),
+                      progress: t.progress(now),
                       state: state,
                       size: 150,
                       stroke: 10,
                       centreLabel:
-                          (item.progress(now) * 100).round().toString(),
+                          (t.progress(now) * 100).round().toString(),
                       centreCaption: s.caption,
                     ),
                   ),
@@ -84,10 +87,13 @@ class ItemDetailScreen extends StatelessWidget {
                   ],
                   const SizedBox(height: 20),
 
-                  if (item.needsReading(now))
-                    _AskForReading(item: item, assetName: assetName),
+                  if (t.needsReading(now) && asset != null)
+                    _AskForReading(tracked: t, asset: asset),
 
-                  _facts(context, c, item, s, now),
+                  _facts(context, c, t, s, now),
+
+                  if (asset != null && item.kind == ItemKind.usage)
+                    _meterLink(context, asset),
 
                   if (suggestion != null)
                     _Suggestion(item: item, value: suggestion),
@@ -103,7 +109,7 @@ class ItemDetailScreen extends StatelessWidget {
                   ],
 
                   _section('SEND A TEXT'),
-                  _TextCard(item: item, assetName: assetName),
+                  _TextCard(tracked: t, assetName: assetName),
 
                   const SizedBox(height: 22),
                   _doneButton(context, c, item),
@@ -146,8 +152,9 @@ class ItemDetailScreen extends StatelessWidget {
         child: Text(label, style: eyebrow()),
       );
 
-  Widget _facts(BuildContext context, UpkeepController c, Item item,
+  Widget _facts(BuildContext context, UpkeepController c, Tracked t,
       ItemSummary s, DateTime now) {
+    final Item item = t.item;
     final List<Widget> rows = <Widget>[];
 
     if (item.kind == ItemKind.usage) {
@@ -156,7 +163,7 @@ class ItemDetailScreen extends StatelessWidget {
         item.target == null
             ? '—'
             : '${fmtNum(item.target!)} ${item.unit}',
-        emphasise: !item.monthsLeads(now),
+        emphasise: !t.monthsLeads(now),
       ));
       rows.add(_factRow(
         'Interval',
@@ -172,24 +179,24 @@ class ItemDetailScreen extends StatelessWidget {
               ? '${item.intervalMonths} months'
               : '${item.intervalMonths} months · ${fmtDate(byMonths)}',
           // Highlight whichever limit is actually going to trip first.
-          emphasise: item.monthsLeads(now),
+          emphasise: t.monthsLeads(now),
         ));
       }
-      final Reading? last = item.latestReading;
+      final Reading? last = t.latestReading;
       rows.add(_factRow(
         'Last reading',
         last == null
             ? 'none yet'
             : '${fmtNum(last.value)} · ${fmtDate(last.at)}',
       ));
-      final double? rate = item.unitsPerDay;
+      final double? rate = t.unitsPerDay;
       rows.add(_factRow(
         'Your pace',
         rate == null
             ? 'needs two readings'
             : '~${rate.round()} ${item.unit}/day',
       ));
-      final DateTime? due = item.dueDate(now);
+      final DateTime? due = t.dueDate(now);
       rows.add(_factRow(
           'Guessing', due == null ? 'no date yet' : '~${fmtDate(due)}'));
     } else {
@@ -214,6 +221,41 @@ class ItemDetailScreen extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
       decoration: panelBox(),
       child: Column(children: rows),
+    );
+  }
+
+  /// The meter belongs to the asset, so say so — and give a way in to fix
+  /// a number that was typed wrong.
+  Widget _meterLink(BuildContext context, Asset asset) {
+    final int n = asset.readings.length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.push<void>(
+          context,
+          MaterialPageRoute<void>(
+              builder: (_) => AssetReadingsScreen(assetId: asset.id)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.speed_rounded, size: 16, color: kTextFaint),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "${asset.name}'s meter — "
+                  '$n reading${n == 1 ? '' : 's'}',
+                  style: const TextStyle(fontSize: 12.5, color: kTextDim),
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded,
+                  size: 16, color: kTextFaint),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -338,7 +380,7 @@ class ItemDetailScreen extends StatelessWidget {
       reading = await promptForNumber(
         context,
         title: 'Done at what ${item.unit == 'mi' ? 'mileage' : item.unit}?',
-        hint: item.estimatedReading()?.round().toString(),
+        hint: c.track(item).estimatedReading()?.round().toString(),
       );
       if (reading == null) return; // cancelled
     }
@@ -359,15 +401,17 @@ class ItemDetailScreen extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════
 
 class _AskForReading extends StatelessWidget {
-  final Item item;
-  final String assetName;
+  final Tracked tracked;
+  final Asset asset;
 
-  const _AskForReading({required this.item, required this.assetName});
+  const _AskForReading({required this.tracked, required this.asset});
+
+  Item get item => tracked.item;
 
   @override
   Widget build(BuildContext context) {
     final UpkeepController c = UpkeepScope.of(context);
-    final double? est = item.estimatedReading();
+    final double? est = tracked.estimatedReading();
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -395,7 +439,9 @@ class _AskForReading extends StatelessWidget {
                   title: 'Current ${item.unit == 'mi' ? 'mileage' : item.unit}',
                   hint: est?.round().toString(),
                 );
-                if (v != null) await c.addReading(item, v);
+                if (v != null && context.mounted) {
+                  await saveReading(context, c, asset, v);
+                }
               },
               style: FilledButton.styleFrom(
                 backgroundColor: kReady,
@@ -482,14 +528,16 @@ class _Suggestion extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════
 
 class _TextCard extends StatelessWidget {
-  final Item item;
+  final Tracked tracked;
   final String assetName;
 
-  const _TextCard({required this.item, required this.assetName});
+  const _TextCard({required this.tracked, required this.assetName});
+
+  Item get item => tracked.item;
 
   @override
   Widget build(BuildContext context) {
-    final String body = renderMessage(item, assetName);
+    final String body = renderMessage(tracked, assetName);
     final bool hasContact = (item.contactPhone ?? '').trim().isNotEmpty;
 
     return Container(
@@ -553,53 +601,4 @@ class _TextCard extends StatelessWidget {
           const SnackBar(content: Text("Couldn't open a messaging app.")));
     }
   }
-}
-
-// ═══════════════════════════════════════════════════════════════════════
-
-/// Small number prompt. Returns null when cancelled — callers must treat
-/// that as "do nothing", never as zero.
-Future<double?> promptForNumber(
-  BuildContext context, {
-  required String title,
-  String? hint,
-}) async {
-  final TextEditingController ctrl = TextEditingController();
-  return showDialog<double>(
-    context: context,
-    builder: (BuildContext ctx) => AlertDialog(
-      backgroundColor: kPanel,
-      title: Text(title, style: const TextStyle(fontSize: 16, color: kText)),
-      content: TextField(
-        controller: ctrl,
-        autofocus: true,
-        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-        style: mono(size: 18, color: kText),
-        decoration: InputDecoration(
-          hintText: hint,
-          hintStyle: mono(size: 18, color: kTextFaint),
-          enabledBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: kPanelEdge)),
-          focusedBorder: const UnderlineInputBorder(
-              borderSide: BorderSide(color: kReady)),
-        ),
-      ),
-      actions: <Widget>[
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          style: TextButton.styleFrom(foregroundColor: kTextFaint),
-          child: const Text('Cancel'),
-        ),
-        TextButton(
-          onPressed: () {
-            final double? v =
-                double.tryParse(ctrl.text.replaceAll(',', '').trim());
-            Navigator.pop(ctx, v);
-          },
-          style: TextButton.styleFrom(foregroundColor: kReady),
-          child: const Text('Save'),
-        ),
-      ],
-    ),
-  );
 }

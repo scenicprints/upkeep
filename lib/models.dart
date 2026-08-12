@@ -26,22 +26,52 @@ String kindLabel(ItemKind k) => switch (k) {
     };
 
 /// A thing that owns items — a car, the house, you.
+///
+/// The odometer lives HERE, not on each item. A car has one meter; if the
+/// readings hung off individual items you'd have to punch the same number
+/// in once per item, and any item you forgot would quietly keep coasting on
+/// a stale guess.
 class Asset {
   String id;
   String name;
+
+  /// The asset's meter. Empty for things that don't have one (a house).
+  List<Reading> readings;
+
+  /// What that meter counts: 'mi' or 'hr'.
+  String unit;
+
   bool deleted;
   int updatedAtMs;
 
   Asset({
     required this.id,
     required this.name,
+    List<Reading>? readings,
+    this.unit = 'mi',
     this.deleted = false,
     int? updatedAtMs,
-  }) : updatedAtMs = updatedAtMs ?? DateTime.now().millisecondsSinceEpoch;
+  })  : readings = readings ?? <Reading>[],
+        updatedAtMs = updatedAtMs ?? DateTime.now().millisecondsSinceEpoch;
+
+  List<Reading> get sortedReadings {
+    final List<Reading> r = <Reading>[...readings]
+      ..sort((Reading a, Reading b) => a.at.compareTo(b.at));
+    return r;
+  }
+
+  Reading? get latestReading {
+    final List<Reading> r = sortedReadings;
+    return r.isEmpty ? null : r.last;
+  }
+
+  bool get hasMeter => readings.isNotEmpty;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'name': name,
+        'readings': readings.map((Reading r) => r.toJson()).toList(),
+        'unit': unit,
         'deleted': deleted,
         'updated_at_ms': updatedAtMs,
       };
@@ -49,24 +79,38 @@ class Asset {
   static Asset fromJson(Map<String, dynamic> j) => Asset(
         id: j['id'] as String,
         name: (j['name'] as String?) ?? '',
+        readings: ((j['readings'] as List<dynamic>?) ?? const <dynamic>[])
+            .map((dynamic e) => Reading.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        unit: (j['unit'] as String?) ?? 'mi',
         deleted: (j['deleted'] as bool?) ?? false,
         updatedAtMs: (j['updated_at_ms'] as num?)?.toInt(),
       );
 }
 
 /// An odometer/hour-meter reading you punched in.
+///
+/// Carries an id so a fat-fingered number can be found and corrected —
+/// one bad reading poisons the learned rate and every date derived from it.
 class Reading {
+  final String id;
   final DateTime at;
   final double value;
 
-  const Reading({required this.at, required this.value});
+  Reading({String? id, required this.at, required this.value})
+      : id = id ?? newId();
+
+  Reading copyWith({DateTime? at, double? value}) =>
+      Reading(id: id, at: at ?? this.at, value: value ?? this.value);
 
   Map<String, dynamic> toJson() => <String, dynamic>{
+        'id': id,
         'at': at.toIso8601String(),
         'value': value,
       };
 
   static Reading fromJson(Map<String, dynamic> j) => Reading(
+        id: j['id'] as String?,
         at: DateTime.parse(j['at'] as String),
         value: (j['value'] as num).toDouble(),
       );
@@ -277,70 +321,15 @@ class Item {
     return base + intervalUnits!;
   }
 
-  // ── readings and the learned rate ────────────────────────────────
-
-  List<Reading> get sortedReadings {
-    final List<Reading> r = <Reading>[...readings]
-      ..sort((Reading a, Reading b) => a.at.compareTo(b.at));
-    return r;
-  }
-
-  Reading? get latestReading {
-    final List<Reading> r = sortedReadings;
-    return r.isEmpty ? null : r.last;
-  }
-
-  /// Units per day, learned from your readings. Uses the most recent handful
-  /// so a change in driving habits shows up instead of being averaged away
-  /// against a reading from a year ago.
-  ///
-  /// Null when there isn't enough to say — in which case the app shows the
-  /// target and no date, rather than inventing one.
-  double? get unitsPerDay {
-    final List<Reading> r = sortedReadings;
-    if (r.length < 2) return null;
-    final List<Reading> recent =
-        r.length > 6 ? r.sublist(r.length - 6) : r;
-    final double days =
-        recent.last.at.difference(recent.first.at).inMinutes / 1440.0;
-    final double delta = recent.last.value - recent.first.value;
-    if (days < 0.5 || delta <= 0) return null;
-    return delta / days;
-  }
-
-  /// Where the odometer probably sits right now. Falls back to the last
-  /// number you actually gave it when there's no rate to project with.
-  double? estimatedReading([DateTime? now]) {
-    final Reading? last = latestReading;
-    if (last == null) return null;
-    final double? rate = unitsPerDay;
-    if (rate == null) return last.value;
-    final DateTime n = now ?? DateTime.now();
-    final double days = n.difference(last.at).inMinutes / 1440.0;
-    if (days <= 0) return last.value;
-    return last.value + rate * days;
-  }
-
-  // ── progress ─────────────────────────────────────────────────────
+  // ── the parts that need no readings ──────────────────────────────
+  // These stay on Item; anything that reads the meter lives on Tracked.
 
   /// The calendar date the months limit lands on, if there is one.
-  /// Calendar arithmetic, not 30-day approximations.
   DateTime? get monthsDueDate {
     final DateTime? done = lastDoneAt;
     final int? months = intervalMonths;
     if (done == null || months == null || months <= 0) return null;
     return addMonths(done, months);
-  }
-
-  /// How far through the MILEAGE limit, ignoring any months limit.
-  double usageProgress([DateTime? now]) {
-    if (kind != ItemKind.usage) return 0;
-    final double? base = lastDoneReading;
-    final double? span = intervalUnits;
-    if (base == null || span == null || span <= 0) return 0;
-    final double? est = estimatedReading(now ?? DateTime.now());
-    if (est == null) return 0;
-    return math.max(0, (est - base) / span);
   }
 
   /// How far through the MONTHS limit, ignoring mileage.
@@ -354,92 +343,13 @@ class Item {
     return math.max(0, (n.difference(done).inMinutes / 1440.0) / span);
   }
 
-  /// True when the months limit is the one that will trip first. Only
-  /// meaningful on a usage item that has both.
-  bool monthsLeads([DateTime? now]) =>
-      kind == ItemKind.usage &&
-      intervalMonths != null &&
-      monthsProgress(now) > usageProgress(now);
-
-  /// 0..1+ — how much of the interval is used up. Past 1.0 is overdue.
-  ///
-  /// A usage item with a months limit takes whichever is further along:
-  /// that's what "every 5,000 miles or 6 months, whichever comes first"
-  /// means. A car that barely gets driven still comes due on time.
-  double progress([DateTime? now]) {
+  /// How far through a plain day-interval — time and inspect items.
+  double timeProgress([DateTime? now]) {
     final DateTime n = now ?? DateTime.now();
-    switch (kind) {
-      case ItemKind.time:
-      case ItemKind.inspect:
-        final DateTime? done = lastDoneAt;
-        final int? days = intervalDays;
-        if (done == null || days == null || days <= 0) return 0;
-        final double elapsed = n.difference(done).inMinutes / 1440.0;
-        return math.max(0, elapsed / days);
-      case ItemKind.usage:
-        return math.max(usageProgress(n), monthsProgress(n));
-    }
-  }
-
-  GaugeState state([DateTime? now]) {
-    final double p = progress(now);
-    // An inspect item can never go red. Red means "you are past due", and
-    // the whole point of this kind is that the app CANNOT know that — it
-    // only knows you haven't looked lately. Amber is the honest ceiling.
-    if (kind == ItemKind.inspect) {
-      return p >= 0.9 ? GaugeState.ready : GaugeState.healthy;
-    }
-    if (p >= 1.0) return GaugeState.overdue;
-    if (p >= 0.9) return GaugeState.ready;
-    return GaugeState.healthy;
-  }
-
-  /// When it's expected to come due. For a time item this is exact; for a
-  /// usage item it's a projection off the learned rate, and null when
-  /// there's no rate yet.
-  DateTime? dueDate([DateTime? now]) {
-    final DateTime n = now ?? DateTime.now();
-    switch (kind) {
-      case ItemKind.time:
-      case ItemKind.inspect:
-        final DateTime? done = lastDoneAt;
-        final int? days = intervalDays;
-        if (done == null || days == null) return null;
-        return done.add(Duration(days: days));
-      case ItemKind.usage:
-        // Whichever comes first. Either side may be unknown — a mileage
-        // date needs a learned rate, and the months limit is optional.
-        final DateTime? byMonths = monthsDueDate;
-        DateTime? byMileage;
-        final double? t = target;
-        final double? est = estimatedReading(n);
-        final double? rate = unitsPerDay;
-        if (t != null && est != null && rate != null && rate > 0) {
-          final double remaining = t - est;
-          byMileage = remaining <= 0
-              ? n
-              : n.add(Duration(minutes: (remaining / rate * 1440).round()));
-        }
-        if (byMileage == null) return byMonths;
-        if (byMonths == null) return byMileage;
-        return byMileage.isBefore(byMonths) ? byMileage : byMonths;
-    }
-  }
-
-  /// True when the app should stop guessing and ask for a real number.
-  /// Only ever true for usage items, and only once the guess says you're
-  /// close AND the last number you gave it has gone stale.
-  bool needsReading([DateTime? now]) {
-    if (kind != ItemKind.usage) return false;
-    if (lastDoneReading == null || intervalUnits == null) return false;
-    final DateTime n = now ?? DateTime.now();
-    // Deliberately usageProgress, not progress: if the MONTHS limit is what's
-    // about to trip, the odometer is beside the point and asking for it is
-    // just noise.
-    if (usageProgress(n) < 0.9) return false;
-    final Reading? last = latestReading;
-    if (last == null) return true;
-    return n.difference(last.at).inDays >= 2;
+    final DateTime? done = lastDoneAt;
+    final int? days = intervalDays;
+    if (done == null || days == null || days <= 0) return 0;
+    return math.max(0, (n.difference(done).inMinutes / 1440.0) / days);
   }
 
   // ── interval learning ────────────────────────────────────────────
@@ -491,6 +401,189 @@ class Item {
       return null;
     }
     return rounded;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TRACKED — an item together with the asset whose meter it reads
+//
+// Everything that depends on readings lives here rather than on Item,
+// because the readings belong to the ASSET. One odometer entry for the
+// RAV4 moves the oil change, the rotation and the air filter at once.
+// ═══════════════════════════════════════════════════════════════════════
+
+class Tracked {
+  final Item item;
+  final Asset? asset;
+
+  const Tracked(this.item, this.asset);
+
+  List<Reading> get readings => asset?.readings ?? const <Reading>[];
+
+  List<Reading> get sortedReadings => asset?.sortedReadings ?? const <Reading>[];
+
+  Reading? get latestReading => asset?.latestReading;
+
+  /// Units per day, learned from the asset's readings. Uses the most recent
+  /// handful so a change in driving habits shows up instead of being
+  /// averaged away against a reading from a year ago.
+  ///
+  /// Null when there isn't enough to say — in which case the app shows the
+  /// target and no date, rather than inventing one.
+  double? get unitsPerDay {
+    final List<Reading> r = sortedReadings;
+    if (r.length < 2) return null;
+    final List<Reading> recent = r.length > 6 ? r.sublist(r.length - 6) : r;
+    final double days =
+        recent.last.at.difference(recent.first.at).inMinutes / 1440.0;
+    final double delta = recent.last.value - recent.first.value;
+    if (days < 0.5 || delta <= 0) return null;
+    return delta / days;
+  }
+
+  /// Where the meter probably sits right now. Falls back to the last number
+  /// actually entered when there's no rate to project with.
+  double? estimatedReading([DateTime? now]) {
+    final Reading? last = latestReading;
+    if (last == null) return null;
+    final double? rate = unitsPerDay;
+    if (rate == null) return last.value;
+    final DateTime n = now ?? DateTime.now();
+    final double days = n.difference(last.at).inMinutes / 1440.0;
+    if (days <= 0) return last.value;
+    return last.value + rate * days;
+  }
+
+  /// How far through the MILEAGE limit, ignoring any months limit.
+  double usageProgress([DateTime? now]) {
+    if (item.kind != ItemKind.usage) return 0;
+    final double? base = item.lastDoneReading;
+    final double? span = item.intervalUnits;
+    if (base == null || span == null || span <= 0) return 0;
+    final double? est = estimatedReading(now ?? DateTime.now());
+    if (est == null) return 0;
+    return math.max(0, (est - base) / span);
+  }
+
+  /// True when the months limit is the one that will trip first.
+  bool monthsLeads([DateTime? now]) =>
+      item.kind == ItemKind.usage &&
+      item.intervalMonths != null &&
+      item.monthsProgress(now) > usageProgress(now);
+
+  /// 0..1+ — how much of the interval is used up. Past 1.0 is overdue.
+  ///
+  /// A usage item with a months limit takes whichever is further along:
+  /// that's what "every 5,000 miles or 6 months, whichever comes first"
+  /// means. A car that barely gets driven still comes due on time.
+  double progress([DateTime? now]) {
+    final DateTime n = now ?? DateTime.now();
+    switch (item.kind) {
+      case ItemKind.time:
+      case ItemKind.inspect:
+        return item.timeProgress(n);
+      case ItemKind.usage:
+        return math.max(usageProgress(n), item.monthsProgress(n));
+    }
+  }
+
+  GaugeState state([DateTime? now]) {
+    final double p = progress(now);
+    // An inspect item can never go red. Red means "you are past due", and
+    // the whole point of this kind is that the app CANNOT know that — it
+    // only knows you haven't looked lately. Amber is the honest ceiling.
+    if (item.kind == ItemKind.inspect) {
+      return p >= 0.9 ? GaugeState.ready : GaugeState.healthy;
+    }
+    if (p >= 1.0) return GaugeState.overdue;
+    if (p >= 0.9) return GaugeState.ready;
+    return GaugeState.healthy;
+  }
+
+  /// When it's expected to come due. Exact for a time item and for the
+  /// months limit; a projection off the learned rate for mileage.
+  DateTime? dueDate([DateTime? now]) {
+    final DateTime n = now ?? DateTime.now();
+    switch (item.kind) {
+      case ItemKind.time:
+      case ItemKind.inspect:
+        final DateTime? done = item.lastDoneAt;
+        final int? days = item.intervalDays;
+        if (done == null || days == null) return null;
+        return done.add(Duration(days: days));
+      case ItemKind.usage:
+        // Whichever comes first. Either side may be unknown — a mileage
+        // date needs a learned rate, and the months limit is optional.
+        final DateTime? byMonths = item.monthsDueDate;
+        DateTime? byMileage;
+        final double? t = item.target;
+        final double? est = estimatedReading(n);
+        final double? rate = unitsPerDay;
+        if (t != null && est != null && rate != null && rate > 0) {
+          final double remaining = t - est;
+          byMileage = remaining <= 0
+              ? n
+              : n.add(Duration(minutes: (remaining / rate * 1440).round()));
+        }
+        if (byMileage == null) return byMonths;
+        if (byMonths == null) return byMileage;
+        return byMileage.isBefore(byMonths) ? byMileage : byMonths;
+    }
+  }
+
+  /// True when the app should stop guessing and ask for a real number.
+  bool needsReading([DateTime? now]) {
+    if (item.kind != ItemKind.usage) return false;
+    if (item.lastDoneReading == null || item.intervalUnits == null) {
+      return false;
+    }
+    final DateTime n = now ?? DateTime.now();
+    // Deliberately usageProgress, not progress: if the MONTHS limit is what's
+    // about to trip, the odometer is beside the point and asking for it is
+    // just noise.
+    if (usageProgress(n) < 0.9) return false;
+    final Reading? last = latestReading;
+    if (last == null) return true;
+    return n.difference(last.at).inDays >= 2;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// READING SANITY
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Why a reading looks wrong. Never blocks the entry — the user might be
+/// right and the app wrong (a swapped cluster, a repaired meter) — but it
+/// makes them look twice, because one bad number wrecks every projection.
+enum ReadingWarning { none, wentBackwards, implausibleJump }
+
+ReadingWarning checkReading(Asset asset, double value, [DateTime? now]) {
+  final Reading? last = asset.latestReading;
+  if (last == null) return ReadingWarning.none;
+  if (value < last.value) return ReadingWarning.wentBackwards;
+  final DateTime n = now ?? DateTime.now();
+  final double days =
+      math.max(n.difference(last.at).inMinutes / 1440.0, 0.5);
+  // 500 units a day sustained is a road trip every single day.
+  if ((value - last.value) / days > 500) {
+    return ReadingWarning.implausibleJump;
+  }
+  return ReadingWarning.none;
+}
+
+String readingWarningText(
+    ReadingWarning w, Asset asset, double value, String unit) {
+  final Reading? last = asset.latestReading;
+  switch (w) {
+    case ReadingWarning.none:
+      return '';
+    case ReadingWarning.wentBackwards:
+      return 'That\'s lower than the last reading '
+          '(${fmtNum(last?.value ?? 0)} $unit on '
+          '${last == null ? '' : fmtDate(last.at)}). Typo?';
+    case ReadingWarning.implausibleJump:
+      return 'That\'s ${fmtNum(value - (last?.value ?? 0))} $unit since '
+          '${last == null ? '' : fmtDate(last.at)}. Typo?';
   }
 }
 

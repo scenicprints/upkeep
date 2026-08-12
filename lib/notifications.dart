@@ -74,7 +74,8 @@ class Notifications {
     final DateTime now = DateTime.now();
     int id = 0;
     for (final Item item in data.liveItems) {
-      final DateTime? fireAt = _fireDate(item, now);
+      final Tracked t = data.track(item);
+      final DateTime? fireAt = _fireDate(t, now);
       if (fireAt == null) continue;
       if (!fireAt.isAfter(now)) continue;
 
@@ -84,7 +85,7 @@ class Notifications {
         // Asking for the odometer is only useful when MILEAGE is what's
         // about to trip. If the months limit gets there first, the reading
         // is beside the point.
-        ItemKind.usage => item.monthsLeads(fireAt)
+        ItemKind.usage => t.monthsLeads(fireAt)
             ? 'Coming due on time — ${item.intervalMonths} months.'
             : "Should be near ${_targetText(item)}. What's the odometer?",
         ItemKind.inspect => 'Worth a look.',
@@ -113,7 +114,8 @@ class Notifications {
   }
 
   /// The moment the item hits 90%.
-  static DateTime? _fireDate(Item item, DateTime now) {
+  static DateTime? _fireDate(Tracked t, DateTime now) {
+    final Item item = t.item;
     switch (item.kind) {
       case ItemKind.time:
       case ItemKind.inspect:
@@ -125,8 +127,8 @@ class Notifications {
         // Whichever limit trips first gets the notification.
         DateTime? byMileage;
         final double? span = item.intervalUnits;
-        final double? rate = item.unitsPerDay;
-        final DateTime? mileageDue = item.dueDate(now);
+        final double? rate = t.unitsPerDay;
+        final DateTime? mileageDue = t.dueDate(now);
         if (mileageDue != null && span != null && rate != null && rate > 0) {
           // 90% of the way there is one-tenth of an interval before the
           // projected date.

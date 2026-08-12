@@ -177,7 +177,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   }
 
   String _templateHint() =>
-      renderMessage(_previewItem(), _assetNameFor(_assetId));
+      renderMessage(Tracked(_previewItem(), null), _assetNameFor(_assetId));
 
   Item _previewItem() => Item(
         id: 'preview',

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_state.dart';
+import 'backup_screen.dart';
 import 'gauge.dart';
 import 'history_screen.dart';
 import 'item_detail.dart';
@@ -11,6 +12,7 @@ import 'item_edit.dart';
 import 'mascot.dart';
 import 'models.dart';
 import 'notifications.dart';
+import 'readings_screen.dart';
 import 'summary.dart';
 import 'theme.dart';
 import 'updater.dart';
@@ -130,7 +132,7 @@ class _ClusterScreenState extends State<ClusterScreen> {
   @override
   Widget build(BuildContext context) {
     final UpkeepController c = UpkeepScope.of(context);
-    final List<Item> items = c.ranked;
+    final List<Tracked> items = c.ranked;
 
     return Scaffold(
       // No SafeArea around the whole column: the nav bar's background has to
@@ -174,15 +176,15 @@ class _ClusterScreenState extends State<ClusterScreen> {
 
   /// The panel proper: a status strip, the worst item as a hero, then
   /// everything else as compact rows.
-  Widget _panel(UpkeepController c, List<Item> items) {
-    final Item hero = items.first;
-    final List<Item> rest = items.skip(1).toList();
+  Widget _panel(UpkeepController c, List<Tracked> items) {
+    final Tracked hero = items.first;
+    final List<Tracked> rest = items.skip(1).toList();
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: <Widget>[
         _statusStrip(c),
-        _HeroCard(item: hero, assetName: c.data.assetName(hero)),
+        _HeroCard(tracked: hero, assetName: c.data.assetName(hero.item)),
         if (rest.isNotEmpty) ...<Widget>[
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 22, 16, 8),
@@ -190,11 +192,60 @@ class _ClusterScreenState extends State<ClusterScreen> {
           ),
           for (int i = 0; i < rest.length; i++)
             _ItemRow(
-              item: rest[i],
-              assetName: c.data.assetName(rest[i]),
+              tracked: rest[i],
+              assetName: c.data.assetName(rest[i].item),
               delay: Duration(milliseconds: 90 + i * 70),
             ),
         ],
+        _meters(context, c),
+      ],
+    );
+  }
+
+  /// One odometer entry per CAR, not per item. Parked at the bottom rather
+  /// than the top: it's a thing you do occasionally, not something that
+  /// should compete with the gauges for attention.
+  Widget _meters(BuildContext context, UpkeepController c) {
+    final List<Asset> metered = c.meteredAssets;
+    if (metered.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 26, 16, 8),
+          child: Text('ODOMETERS', style: eyebrow()),
+        ),
+        for (final Asset a in metered)
+          InkWell(
+            onTap: () => Navigator.push<void>(
+              context,
+              MaterialPageRoute<void>(
+                  builder: (_) => AssetReadingsScreen(assetId: a.id)),
+            ),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: Text(a.name,
+                        style:
+                            const TextStyle(fontSize: 13, color: kTextDim)),
+                  ),
+                  Text(
+                    a.latestReading == null
+                        ? 'add one'
+                        : '${fmtNum(a.latestReading!.value)} ${a.unit}',
+                    style: mono(size: 12, color: kText),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.chevron_right_rounded,
+                      size: 16, color: kTextFaint),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -308,17 +359,19 @@ class _EmptyCluster extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════
 
 class _HeroCard extends StatelessWidget {
-  final Item item;
+  final Tracked tracked;
   final String assetName;
 
-  const _HeroCard({required this.item, required this.assetName});
+  const _HeroCard({required this.tracked, required this.assetName});
+
+  Item get item => tracked.item;
 
   @override
   Widget build(BuildContext context) {
     final DateTime now = DateTime.now();
-    final GaugeState state = item.state(now);
-    final ItemSummary s = summarise(item, now);
-    final double pct = item.progress(now) * 100;
+    final GaugeState state = tracked.state(now);
+    final ItemSummary s = summarise(tracked, now);
+    final double pct = tracked.progress(now) * 100;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -340,7 +393,7 @@ class _HeroCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: <Widget>[
                     Gauge(
-                      progress: item.progress(now),
+                      progress: tracked.progress(now),
                       state: state,
                       size: 106,
                       centreLabel: pct.isFinite ? pct.round().toString() : '0',
@@ -380,22 +433,24 @@ class _HeroCard extends StatelessWidget {
 }
 
 class _ItemRow extends StatelessWidget {
-  final Item item;
+  final Tracked tracked;
   final String assetName;
   final Duration delay;
 
   const _ItemRow({
-    required this.item,
+    required this.tracked,
     required this.assetName,
     required this.delay,
   });
 
+  Item get item => tracked.item;
+
   @override
   Widget build(BuildContext context) {
     final DateTime now = DateTime.now();
-    final GaugeState state = item.state(now);
-    final ItemSummary s = summarise(item, now);
-    final double pct = item.progress(now) * 100;
+    final GaugeState state = tracked.state(now);
+    final ItemSummary s = summarise(tracked, now);
+    final double pct = tracked.progress(now) * 100;
 
     return InkWell(
       onTap: () => openItem(context, item),
@@ -404,7 +459,7 @@ class _ItemRow extends StatelessWidget {
         child: Row(
           children: <Widget>[
             Gauge(
-              progress: item.progress(now),
+              progress: tracked.progress(now),
               state: state,
               size: 34,
               stroke: 4,
@@ -516,7 +571,21 @@ class _SettingsSheetState extends State<_SettingsSheet> {
               openReleases();
             },
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 22),
+          Text('YOUR DATA', style: eyebrow()),
+          const SizedBox(height: 6),
+          _row(
+            icon: Icons.save_alt_rounded,
+            label: 'Backup & restore',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const BackupScreen()),
+              );
+            },
+          ),
+          const SizedBox(height: 12),
           const Text(
             'Updates install over the top — nothing you enter is ever '
             'wiped by one. Never uninstall to update.',

@@ -88,17 +88,55 @@ class UpkeepController extends ChangeNotifier {
       reading: reading,
       note: note,
     ));
-    // A service reading is also a reading — no reason to make the user
-    // enter the same number twice.
-    if (reading != null) {
-      item.readings.add(Reading(at: when, value: reading));
+    // A service reading is also a meter reading — no reason to make the user
+    // enter the same number twice. It lands on the ASSET, so every other
+    // item on that car benefits from it too.
+    final Asset? a = data.assetFor(item);
+    if (reading != null && a != null) {
+      a.readings.add(Reading(at: when, value: reading));
+      a.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
     }
     await upsertItem(item);
   }
 
-  Future<void> addReading(Item item, double value, {DateTime? at}) async {
-    item.readings.add(Reading(at: at ?? DateTime.now(), value: value));
-    await upsertItem(item);
+  // ── the meter (lives on the asset) ───────────────────────────────
+
+  Future<void> addReading(Asset asset, double value, {DateTime? at}) async {
+    asset.readings.add(Reading(at: at ?? DateTime.now(), value: value));
+    asset.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await _commit();
+  }
+
+  Future<void> editReading(Asset asset, Reading old,
+      {double? value, DateTime? at}) async {
+    final int i = asset.readings.indexWhere((Reading r) => r.id == old.id);
+    if (i < 0) return;
+    asset.readings[i] = old.copyWith(value: value, at: at);
+    asset.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await _commit();
+  }
+
+  /// Deleting a bad reading has to actually undo its effect — otherwise a
+  /// mistyped number keeps skewing the learned rate forever.
+  Future<void> deleteReading(Asset asset, Reading r) async {
+    asset.readings.removeWhere((Reading e) => e.id == r.id);
+    asset.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await _commit();
+  }
+
+  Future<void> setAssetUnit(Asset asset, String unit) async {
+    asset.unit = unit;
+    asset.updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+    await _commit();
+  }
+
+  /// Assets that actually have a meter worth updating.
+  List<Asset> get meteredAssets {
+    final Set<String> ids = data.liveItems
+        .where((Item i) => i.kind == ItemKind.usage)
+        .map((Item i) => i.assetId)
+        .toSet();
+    return data.liveAssets.where((Asset a) => ids.contains(a.id)).toList();
   }
 
   Future<void> deleteLog(Item item, ServiceLog entry) async {
@@ -123,17 +161,39 @@ class UpkeepController extends ChangeNotifier {
 
   // ── derived ──────────────────────────────────────────────────────
 
+  Tracked track(Item item) => data.track(item);
+
   /// Worst first: overdue, then closest to due. This is the panel order.
-  List<Item> get ranked {
+  List<Tracked> get ranked {
     final DateTime now = DateTime.now();
-    final List<Item> list = data.liveItems;
-    list.sort((Item a, Item b) => b.progress(now).compareTo(a.progress(now)));
+    final List<Tracked> list =
+        data.liveItems.map((Item i) => data.track(i)).toList();
+    list.sort(
+        (Tracked a, Tracked b) => b.progress(now).compareTo(a.progress(now)));
     return list;
   }
 
   int countIn(GaugeState s) {
     final DateTime now = DateTime.now();
-    return data.liveItems.where((Item i) => i.state(now) == s).length;
+    return data.liveItems
+        .where((Item i) => data.track(i).state(now) == s)
+        .length;
+  }
+
+  /// The worst thing on the panel — what the gremlin reacts to.
+  GaugeState get worstState {
+    if (countIn(GaugeState.overdue) > 0) return GaugeState.overdue;
+    if (countIn(GaugeState.ready) > 0) return GaugeState.ready;
+    return GaugeState.healthy;
+  }
+
+  // ── backup ───────────────────────────────────────────────────────
+
+  /// Replaces everything with the contents of a backup. Destructive by
+  /// definition, so the UI confirms with counts before calling it.
+  Future<void> restore(UpkeepData incoming) async {
+    data = incoming;
+    await _commit();
   }
 }
 

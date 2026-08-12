@@ -8,21 +8,29 @@ import 'package:upkeep/theme.dart';
 
 DateTime day(int n) => DateTime(2026, 1, 1).add(Duration(days: n));
 
+/// Readings live on the ASSET now, so tests build a pair. `car` is the
+/// meter every usage item in these tests reads from.
+late Asset car;
+
 Item usageItem({
   double interval = 5000,
   List<Reading> readings = const <Reading>[],
   List<ServiceLog> log = const <ServiceLog>[],
-}) =>
-    Item(
-      id: 'i',
-      name: 'Oil change',
-      assetId: 'a',
-      kind: ItemKind.usage,
-      intervalUnits: interval,
-      unit: 'mi',
-      readings: <Reading>[...readings],
-      log: <ServiceLog>[...log],
-    );
+}) {
+  car = Asset(id: 'a', name: 'Car', unit: 'mi', readings: <Reading>[...readings]);
+  return Item(
+    id: 'i',
+    name: 'Oil change',
+    assetId: 'a',
+    kind: ItemKind.usage,
+    intervalUnits: interval,
+    unit: 'mi',
+    log: <ServiceLog>[...log],
+  );
+}
+
+/// The item paired with the meter it reads.
+Tracked tr(Item i, [Asset? a]) => Tracked(i, a ?? car);
 
 void main() {
   group('usage items — the target is exact', () {
@@ -44,7 +52,7 @@ void main() {
         ServiceLog(id: '1', at: day(0), reading: 38410),
       ]);
       expect(i.target, 43410);
-      i.readings.addAll(<Reading>[
+      car.readings.addAll(<Reading>[
         Reading(at: day(1), value: 38500),
         Reading(at: day(60), value: 42000),
       ]);
@@ -56,9 +64,9 @@ void main() {
     test('needs two readings before it will guess', () {
       final Item i = usageItem(
           readings: <Reading>[Reading(at: day(0), value: 100)]);
-      expect(i.unitsPerDay, isNull);
+      expect(tr(i).unitsPerDay, isNull);
       // With no rate it still reports the last real number, not a guess.
-      expect(i.estimatedReading(day(30)), 100);
+      expect(tr(i).estimatedReading(day(30)), 100);
     });
 
     test('computes miles per day across the readings', () {
@@ -66,7 +74,7 @@ void main() {
         Reading(at: day(0), value: 1000),
         Reading(at: day(10), value: 1320),
       ]);
-      expect(i.unitsPerDay, closeTo(32, 0.01));
+      expect(tr(i).unitsPerDay, closeTo(32, 0.01));
     });
 
     test('projects the current odometer forward from the last reading', () {
@@ -74,7 +82,7 @@ void main() {
         Reading(at: day(0), value: 1000),
         Reading(at: day(10), value: 1320),
       ]);
-      expect(i.estimatedReading(day(20)), closeTo(1640, 0.5));
+      expect(tr(i).estimatedReading(day(20)), closeTo(1640, 0.5));
     });
 
     test('a backwards reading does not produce a negative rate', () {
@@ -83,7 +91,7 @@ void main() {
         Reading(at: day(0), value: 5000),
         Reading(at: day(10), value: 400),
       ]);
-      expect(i.unitsPerDay, isNull);
+      expect(tr(i).unitsPerDay, isNull);
     });
 
     test('uses recent readings so a habit change shows up', () {
@@ -93,7 +101,7 @@ void main() {
         Reading(at: day(70), value: 2600),
       ]);
       // Recent window is steeper than the lifetime average of 10/day.
-      expect(i.unitsPerDay!, greaterThan(12));
+      expect(tr(i).unitsPerDay!, greaterThan(12));
     });
   });
 
@@ -107,8 +115,8 @@ void main() {
         ],
       );
       // 500 of 5000 used.
-      expect(i.progress(day(10)), closeTo(0.10, 0.001));
-      expect(i.state(day(10)), GaugeState.healthy);
+      expect(tr(i).progress(day(10)), closeTo(0.10, 0.001));
+      expect(tr(i).state(day(10)), GaugeState.healthy);
     });
 
     test('turns ready at 90% and overdue past 100%', () {
@@ -119,10 +127,10 @@ void main() {
           Reading(at: day(10), value: 44500), // 4500 of 5000 = 90%
         ],
       );
-      expect(i.state(day(10)), GaugeState.ready);
+      expect(tr(i).state(day(10)), GaugeState.ready);
 
-      i.readings.add(Reading(at: day(11), value: 45500));
-      expect(i.state(day(11)), GaugeState.overdue);
+      car.readings.add(Reading(at: day(11), value: 45500));
+      expect(tr(i).state(day(11)), GaugeState.overdue);
     });
 
     test('a time item is exact, no readings involved', () {
@@ -134,10 +142,10 @@ void main() {
         intervalDays: 90,
         log: <ServiceLog>[ServiceLog(id: '1', at: day(0))],
       );
-      expect(i.progress(day(45)), closeTo(0.5, 0.01));
-      expect(i.dueDate(day(0)), day(90));
-      expect(i.state(day(81)), GaugeState.ready);
-      expect(i.state(day(95)), GaugeState.overdue);
+      expect(Tracked(i, null).progress(day(45)), closeTo(0.5, 0.01));
+      expect(Tracked(i, null).dueDate(day(0)), day(90));
+      expect(Tracked(i, null).state(day(81)), GaugeState.ready);
+      expect(Tracked(i, null).state(day(95)), GaugeState.overdue);
     });
 
     test('an unlogged item sits at zero rather than reading as overdue', () {
@@ -147,50 +155,57 @@ void main() {
           assetId: 'a',
           kind: ItemKind.time,
           intervalDays: 30);
-      expect(i.progress(day(500)), 0);
-      expect(i.state(day(500)), GaugeState.healthy);
+      expect(Tracked(i, null).progress(day(500)), 0);
+      expect(Tracked(i, null).state(day(500)), GaugeState.healthy);
     });
   });
 
   group('mileage OR months — whichever comes first', () {
-    Item both({double interval = 5000, int months = 6}) => Item(
-          id: 'i',
-          name: 'Oil change',
-          assetId: 'a',
-          kind: ItemKind.usage,
-          intervalUnits: interval,
-          intervalMonths: months,
-          unit: 'mi',
-          log: <ServiceLog>[
-            ServiceLog(id: '1', at: day(0), reading: 40000),
-          ],
-          readings: <Reading>[Reading(at: day(0), value: 40000)],
-        );
+    Item both({double interval = 5000, int months = 6}) {
+      car = Asset(
+        id: 'a',
+        name: 'Car',
+        unit: 'mi',
+        readings: <Reading>[Reading(at: day(0), value: 40000)],
+      );
+      return Item(
+        id: 'i',
+        name: 'Oil change',
+        assetId: 'a',
+        kind: ItemKind.usage,
+        intervalUnits: interval,
+        intervalMonths: months,
+        unit: 'mi',
+        log: <ServiceLog>[
+          ServiceLog(id: '1', at: day(0), reading: 40000),
+        ],
+      );
+    }
 
     test('months drives the gauge when the car barely moves', () {
       final Item i = both();
       // 200 miles in five months — mileage is nowhere near, the calendar is.
-      i.readings.add(Reading(at: day(150), value: 40200));
-      expect(i.usageProgress(day(150)), closeTo(0.04, 0.01));
+      car.readings.add(Reading(at: day(150), value: 40200));
+      expect(tr(i).usageProgress(day(150)), closeTo(0.04, 0.01));
       expect(i.monthsProgress(day(150)), greaterThan(0.8));
-      expect(i.progress(day(150)), i.monthsProgress(day(150)));
-      expect(i.monthsLeads(day(150)), isTrue);
+      expect(tr(i).progress(day(150)), i.monthsProgress(day(150)));
+      expect(tr(i).monthsLeads(day(150)), isTrue);
     });
 
     test('mileage drives it when the car gets hammered', () {
       final Item i = both();
-      i.readings.add(Reading(at: day(30), value: 44700)); // 4,700 in a month
-      expect(i.usageProgress(day(30)), closeTo(0.94, 0.01));
+      car.readings.add(Reading(at: day(30), value: 44700)); // 4,700 in a month
+      expect(tr(i).usageProgress(day(30)), closeTo(0.94, 0.01));
       expect(i.monthsProgress(day(30)), lessThan(0.2));
-      expect(i.progress(day(30)), closeTo(0.94, 0.01));
-      expect(i.monthsLeads(day(30)), isFalse);
+      expect(tr(i).progress(day(30)), closeTo(0.94, 0.01));
+      expect(tr(i).monthsLeads(day(30)), isFalse);
     });
 
     test('the due date is the earlier of the two', () {
       final Item i = both();
-      i.readings.add(Reading(at: day(100), value: 40500)); // 5 mi/day
+      car.readings.add(Reading(at: day(100), value: 40500)); // 5 mi/day
       // At 5 mi/day, 4,500 more miles is ~900 days away. Six months isn't.
-      final DateTime? due = i.dueDate(day(100));
+      final DateTime? due = tr(i).dueDate(day(100));
       expect(due, isNotNull);
       expect(due!.isBefore(day(200)), isTrue);
       expect(due, i.monthsDueDate);
@@ -198,35 +213,35 @@ void main() {
 
     test('goes overdue on the calendar even with no miles driven', () {
       final Item i = both();
-      expect(i.state(day(200)), GaugeState.overdue);
+      expect(tr(i).state(day(200)), GaugeState.overdue);
     });
 
     test('with no months limit it behaves exactly as before', () {
       final Item i = both(months: 0)..intervalMonths = null;
       expect(i.monthsProgress(day(400)), 0);
-      expect(i.progress(day(400)), i.usageProgress(day(400)));
-      expect(i.monthsLeads(day(400)), isFalse);
+      expect(tr(i).progress(day(400)), tr(i).usageProgress(day(400)));
+      expect(tr(i).monthsLeads(day(400)), isFalse);
     });
 
     test('it never asks for an odometer when the calendar is what trips', () {
       final Item i = both();
-      i.readings.add(Reading(at: day(150), value: 40200));
-      expect(i.progress(day(175)), greaterThan(0.9));
+      car.readings.add(Reading(at: day(150), value: 40200));
+      expect(tr(i).progress(day(175)), greaterThan(0.9));
       // Mileage is at 4% — an odometer reading would tell it nothing.
-      expect(i.needsReading(day(175)), isFalse);
+      expect(tr(i).needsReading(day(175)), isFalse);
     });
 
     test('the headline carries both limits', () {
       final Item i = both();
-      final ItemSummary s = summarise(i, day(10));
+      final ItemSummary s = summarise(tr(i), day(10));
       expect(s.headline, contains('45,000 mi'));
       expect(s.headline, contains(' or '));
     });
 
     test('the months date is exact, so it is not marked as a guess', () {
       final Item i = both();
-      i.readings.add(Reading(at: day(150), value: 40200));
-      final ItemSummary s = summarise(i, day(150));
+      car.readings.add(Reading(at: day(150), value: 40200));
+      final ItemSummary s = summarise(tr(i), day(150));
       expect(s.sub, contains('months first'));
     });
 
@@ -267,8 +282,8 @@ void main() {
           Reading(at: day(10), value: 44500),
         ],
       );
-      expect(i.needsReading(day(10)), isFalse, reason: 'reading is fresh');
-      expect(i.needsReading(day(13)), isTrue);
+      expect(tr(i).needsReading(day(10)), isFalse, reason: 'reading is fresh');
+      expect(tr(i).needsReading(day(13)), isTrue);
     });
 
     test('never asks below 90%', () {
@@ -279,7 +294,7 @@ void main() {
           Reading(at: day(10), value: 40100),
         ],
       );
-      expect(i.needsReading(day(60)), isFalse);
+      expect(tr(i).needsReading(day(60)), isFalse);
     });
 
     test('time items never ask for a reading', () {
@@ -291,7 +306,7 @@ void main() {
         intervalDays: 90,
         log: <ServiceLog>[ServiceLog(id: '1', at: day(0))],
       );
-      expect(i.needsReading(day(89)), isFalse);
+      expect(Tracked(i, null).needsReading(day(89)), isFalse);
     });
   });
 
@@ -355,7 +370,7 @@ void main() {
           Reading(at: day(10), value: 43320),
         ],
       );
-      final ItemSummary s = summarise(i, day(10));
+      final ItemSummary s = summarise(tr(i), day(10));
       expect(s.headline, '48,000 mi');
       // Everything derived from the rate is marked as approximate.
       expect(s.sub, contains('~'));
@@ -370,7 +385,7 @@ void main() {
         intervalDays: 60,
         log: <ServiceLog>[ServiceLog(id: '1', at: day(0))],
       );
-      final ItemSummary s = summarise(i, day(70));
+      final ItemSummary s = summarise(Tracked(i, null), day(70));
       expect(s.headline.toLowerCase(), contains('look'));
       expect(s.headline.toLowerCase(), isNot(contains('due')));
       expect(s.caption, 'TAKE A LOOK');
@@ -387,13 +402,13 @@ void main() {
         intervalDays: 60,
         log: <ServiceLog>[ServiceLog(id: '1', at: day(0))],
       );
-      expect(i.progress(day(600)), greaterThan(5.0));
-      expect(i.state(day(600)), GaugeState.ready);
-      expect(summarise(i, day(600)).caption, 'TAKE A LOOK');
+      expect(Tracked(i, null).progress(day(600)), greaterThan(5.0));
+      expect(Tracked(i, null).state(day(600)), GaugeState.ready);
+      expect(summarise(Tracked(i, null), day(600)).caption, 'TAKE A LOOK');
     });
 
     test('a usage item with no log tells you to log it', () {
-      final ItemSummary s = summarise(usageItem(), day(0));
+      final ItemSummary s = summarise(tr(usageItem()), day(0));
       expect(s.headline, 'Every 5,000 mi');
       expect(s.sub.toLowerCase(), contains('log it once'));
     });
@@ -406,14 +421,14 @@ void main() {
       );
       i.messageTemplate = '{asset} needs {item} at {target}.';
       expect(
-        renderMessage(i, "Jenny's RAV4", day(5)),
+        renderMessage(tr(i), "Jenny's RAV4", day(5)),
         "Jenny's RAV4 needs Oil change at 48,000 mi.",
       );
     });
 
     test('the default template still reads properly with no target yet', () {
       final Item i = usageItem();
-      final String msg = renderMessage(i, 'The Truck', day(0));
+      final String msg = renderMessage(tr(i), 'The Truck', day(0));
       expect(msg, isNot(contains('{')));
       expect(msg, contains('The Truck'));
     });
@@ -441,7 +456,6 @@ void main() {
     test('an item survives being written and read back', () {
       final Item i = usageItem(
         log: <ServiceLog>[ServiceLog(id: '1', at: day(0), reading: 40000)],
-        readings: <Reading>[Reading(at: day(3), value: 40100)],
       )
         ..links = <LinkRef>[LinkRef(label: 'Book', url: 'https://x.test')]
         ..parts = <PartRef>[PartRef(number: '90915-YZZJ1', label: 'filter')]
@@ -455,7 +469,6 @@ void main() {
       expect(back.links.first.url, 'https://x.test');
       expect(back.parts.first.number, '90915-YZZJ1');
       expect(back.contactPhone, '555-0100');
-      expect(back.readings.length, 1);
       expect(back.log.first.reading, 40000);
     });
   });
