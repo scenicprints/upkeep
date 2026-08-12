@@ -24,6 +24,7 @@ dependencies:
   flutter_contacts: ^1.1.9          # pick who to text
   flutter_local_notifications: ^19.4.2
   timezone: ^0.10.0                 # required by scheduled notifications
+  share_plus: ^10.1.4               # hand a backup file to Drive/Gmail/etc
 
 dev_dependencies:
   flutter_test:

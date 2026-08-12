@@ -74,15 +74,20 @@ class Notifications {
     final DateTime now = DateTime.now();
     int id = 0;
     for (final Item item in data.liveItems) {
-      final DateTime? fireAt = _fireDate(item, now);
+      final Tracked t = data.track(item);
+      final DateTime? fireAt = _fireDate(t, now);
       if (fireAt == null) continue;
       if (!fireAt.isAfter(now)) continue;
 
       final String assetName = data.assetName(item);
       final String where = assetName.isEmpty ? '' : ' · $assetName';
       final String body = switch (item.kind) {
-        ItemKind.usage =>
-          "Should be near ${_targetText(item)}. What's the odometer?",
+        // Asking for the odometer is only useful when MILEAGE is what's
+        // about to trip. If the months limit gets there first, the reading
+        // is beside the point.
+        ItemKind.usage => t.monthsLeads(fireAt)
+            ? 'Coming due on time — ${item.intervalMonths} months.'
+            : "Should be near ${_targetText(item)}. What's the odometer?",
         ItemKind.inspect => 'Worth a look.',
         ItemKind.time => 'Coming due.',
       };
@@ -109,7 +114,8 @@ class Notifications {
   }
 
   /// The moment the item hits 90%.
-  static DateTime? _fireDate(Item item, DateTime now) {
+  static DateTime? _fireDate(Tracked t, DateTime now) {
+    final Item item = t.item;
     switch (item.kind) {
       case ItemKind.time:
       case ItemKind.inspect:
@@ -118,16 +124,31 @@ class Notifications {
         if (done == null || days == null || days <= 0) return null;
         return done.add(Duration(days: (days * 0.9).round()));
       case ItemKind.usage:
-        final DateTime? due = item.dueDate(now);
+        // Whichever limit trips first gets the notification.
+        DateTime? byMileage;
         final double? span = item.intervalUnits;
-        final double? rate = item.unitsPerDay;
-        if (due == null || span == null || rate == null || rate <= 0) {
-          return null;
+        final double? rate = t.unitsPerDay;
+        final DateTime? mileageDue = t.dueDate(now);
+        if (mileageDue != null && span != null && rate != null && rate > 0) {
+          // 90% of the way there is one-tenth of an interval before the
+          // projected date.
+          final double leadDays = span * 0.10 / rate;
+          byMileage =
+              mileageDue.subtract(Duration(minutes: (leadDays * 1440).round()));
         }
-        // 90% of the way there is one-tenth of an interval before the
-        // projected date.
-        final double leadDays = span * 0.10 / rate;
-        return due.subtract(Duration(minutes: (leadDays * 1440).round()));
+
+        DateTime? byMonths;
+        final DateTime? done = item.lastDoneAt;
+        final DateTime? monthsDue = item.monthsDueDate;
+        if (done != null && monthsDue != null) {
+          final int span90 =
+              (monthsDue.difference(done).inMinutes * 0.9).round();
+          byMonths = done.add(Duration(minutes: span90));
+        }
+
+        if (byMileage == null) return byMonths;
+        if (byMonths == null) return byMileage;
+        return byMileage.isBefore(byMonths) ? byMileage : byMonths;
     }
   }
 

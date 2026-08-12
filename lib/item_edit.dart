@@ -32,6 +32,9 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
             ? (widget.existing!.intervalUnits?.round().toString() ?? '')
             : (widget.existing!.intervalDays?.toString() ?? '')),
   );
+  /// The optional second limit on a usage item: "or every 6 months".
+  late final TextEditingController _months = TextEditingController(
+      text: widget.existing?.intervalMonths?.toString() ?? '');
   late final TextEditingController _template = TextEditingController(
       text: widget.existing?.messageTemplate ?? '');
 
@@ -59,6 +62,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   void dispose() {
     _name.dispose();
     _interval.dispose();
+    _months.dispose();
     _template.dispose();
     _startReading.dispose();
     super.dispose();
@@ -112,6 +116,19 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
                     ],
                   ]),
 
+                  if (_kind == ItemKind.usage) ...<Widget>[
+                    const SizedBox(height: 18),
+                    _label('OR EVERY (MONTHS) — OPTIONAL'),
+                    _field(_months, hint: '6', number: true),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Whichever comes first. Leave blank to go by '
+                      'mileage alone.',
+                      style: TextStyle(
+                          fontSize: 10.5, color: kTextFaint, height: 1.45),
+                    ),
+                  ],
+
                   if (_isNew) ...<Widget>[
                     const SizedBox(height: 22),
                     _label('WHERE IT STANDS NOW'),
@@ -160,7 +177,7 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
   }
 
   String _templateHint() =>
-      renderMessage(_previewItem(), _assetNameFor(_assetId));
+      renderMessage(Tracked(_previewItem(), null), _assetNameFor(_assetId));
 
   Item _previewItem() => Item(
         id: 'preview',
@@ -565,9 +582,13 @@ class _ItemEditScreenState extends State<ItemEditScreen> {
     if (_kind == ItemKind.usage) {
       item.intervalUnits = interval;
       item.intervalDays = null;
+      // Optional second limit — blank or nonsense means mileage only.
+      final int? months = int.tryParse(_months.text.trim());
+      item.intervalMonths = (months != null && months > 0) ? months : null;
     } else {
       item.intervalDays = interval.round();
       item.intervalUnits = null;
+      item.intervalMonths = null;
     }
     item.links = _links
         .where((LinkRef l) => l.url.trim().isNotEmpty)

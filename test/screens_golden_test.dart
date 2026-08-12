@@ -6,9 +6,11 @@ import 'package:flutter/services.dart' show FontLoader;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:upkeep/app_state.dart';
 import 'package:upkeep/item_detail.dart';
+import 'package:upkeep/backup_screen.dart';
 import 'package:upkeep/item_edit.dart';
 import 'package:upkeep/main.dart';
 import 'package:upkeep/models.dart';
+import 'package:upkeep/readings_screen.dart';
 import 'package:upkeep/store.dart';
 import 'package:upkeep/theme.dart';
 
@@ -51,7 +53,18 @@ DateTime ago(int days) => DateTime.now().subtract(Duration(days: days));
 /// A panel with one of everything, so every state is visible at once.
 /// Test-only — the app itself never seeds a single row.
 UpkeepController demoController() {
-  final Asset car = Asset(id: 'car', name: "Jenny's RAV4");
+  // The odometer belongs to the CAR — every mileage item on it reads this
+  // one meter.
+  final Asset car = Asset(
+    id: 'car',
+    name: "Jenny's RAV4",
+    unit: 'mi',
+    readings: <Reading>[
+      Reading(at: ago(120), value: 38410),
+      Reading(at: ago(30), value: 41300),
+      Reading(at: ago(4), value: 42950),
+    ],
+  );
   final Asset house = Asset(id: 'house', name: 'The House');
   final Asset me = Asset(id: 'me', name: 'Me');
 
@@ -61,14 +74,10 @@ UpkeepController demoController() {
     assetId: car.id,
     kind: ItemKind.usage,
     intervalUnits: 5000,
+    intervalMonths: 6, // whichever comes first
     unit: 'mi',
     log: <ServiceLog>[
       ServiceLog(id: 'l1', at: ago(120), reading: 38410),
-    ],
-    readings: <Reading>[
-      Reading(at: ago(120), value: 38410),
-      Reading(at: ago(30), value: 41300),
-      Reading(at: ago(4), value: 42950),
     ],
     links: <LinkRef>[
       LinkRef(label: 'Toyota of Clovis — book', url: 'https://example.test'),
@@ -169,6 +178,38 @@ void main() {
     await expectLater(
       find.byType(ItemDetailScreen),
       matchesGoldenFile('goldens/item_detail.png'),
+    );
+  }, skip: !Platform.isWindows);
+
+  Widget wrap(UpkeepController c, Widget home) => UpkeepScope(
+        notifier: c,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: buildTheme(),
+          home: home,
+        ),
+      );
+
+  testWidgets('the meter', (WidgetTester tester) async {
+    await phone(tester);
+    final UpkeepController c = demoController();
+    await tester.pumpWidget(
+        wrap(c, const AssetReadingsScreen(assetId: 'car')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await expectLater(
+      find.byType(AssetReadingsScreen),
+      matchesGoldenFile('goldens/readings.png'),
+    );
+  }, skip: !Platform.isWindows);
+
+  testWidgets('backup', (WidgetTester tester) async {
+    await phone(tester);
+    final UpkeepController c = demoController();
+    await tester.pumpWidget(wrap(c, const BackupScreen()));
+    await tester.pump(const Duration(milliseconds: 400));
+    await expectLater(
+      find.byType(BackupScreen),
+      matchesGoldenFile('goldens/backup.png'),
     );
   }, skip: !Platform.isWindows);
 

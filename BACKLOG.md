@@ -38,10 +38,43 @@ Releases are **batched**. Work lands on a feature branch, gets merged
       inexact so no exact-alarm permission is needed.
 - [x] **History** — newest first, swipe to remove, feeds interval learning.
 
-### Still to build
-- [ ] Mascot moods wired to the real worst-state on the panel (he only
-      appears on the empty state today).
-- [ ] Reorder / group the cluster by asset rather than pure urgency.
+---
+
+## v0.3.0 — batch in progress (branch `feature/batch-v0.3`)
+
+### Done
+- [x] **Mileage OR months, whichever comes first.** A usage item takes an
+      optional second limit in months. Whichever is further along drives the
+      gauge, so a car that barely moves still comes due on time. Both limits
+      show in the headline (`43,410 mi or Oct 13`). Calendar arithmetic, not
+      30-day approximations — six months from Aug 31 is Feb 28. The 90% ask
+      and the notification only mention the odometer when MILEAGE is the
+      limit about to trip; if the calendar gets there first, a reading tells
+      you nothing.
+
+- [x] **The odometer belongs to the CAR, not to each item.** Readings moved
+      from `Item` to `Asset`; everything that reads the meter moved to a new
+      `Tracked` view. One entry now moves every mileage item on that car,
+      instead of asking for the same number once per item and letting the
+      ones you skipped coast on a stale guess. Migration folds v0.2 files up
+      automatically — additive, idempotent, and it leaves an orphaned item's
+      readings alone rather than dropping them.
+- [x] **A mistyped reading can be fixed.** New meter screen per asset: see
+      every reading, tap to correct, swipe to remove. Entering one that goes
+      backwards, or that implies a wild jump, asks you to look twice — but
+      never blocks it, because a swapped cluster is a real thing.
+- [x] **Backup.** Export a dated .json through the share sheet (Drive, email
+      to yourself). Restore by pasting it back, with a confirm that shows
+      what's being traded for what. Paste rather than a file picker on
+      purpose — file_picker needs a newer Android toolchain than this
+      project builds on.
+
+### Candidates
+- [ ] Mascot moods wired to the real worst-state on the panel
+      (`UpkeepController.worstState` is already there, unused).
+- [ ] Group the cluster by asset rather than pure urgency.
+- [ ] Snooze — defer an item without logging it as done.
+- [ ] A note on a logged service (the field exists; there's no box for it).
 
 ---
 

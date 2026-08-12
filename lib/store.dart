@@ -55,11 +55,44 @@ class UpkeepData {
             .toList(),
       );
 
+  /// Pairs an item with the asset whose meter it reads.
+  Tracked track(Item i) => Tracked(i, assetFor(i));
+
   String encode() => const JsonEncoder.withIndent('  ').convert(toJson());
 
   static UpkeepData decode(String s) {
     if (s.trim().isEmpty) return UpkeepData();
-    return UpkeepData.fromJson(json.decode(s) as Map<String, dynamic>);
+    final UpkeepData d =
+        UpkeepData.fromJson(json.decode(s) as Map<String, dynamic>);
+    d.migrateReadingsToAssets();
+    return d;
+  }
+
+  /// v0.2 stored readings on each ITEM. They belong to the asset — one car,
+  /// one odometer — so fold them up on load.
+  ///
+  /// Additive and idempotent: readings are merged by (day, value) so running
+  /// it twice can't duplicate them, and an item's copy is only cleared once
+  /// its numbers are safely on the asset. Nothing is ever discarded.
+  bool migrateReadingsToAssets() {
+    bool changed = false;
+    for (final Item i in items) {
+      if (i.readings.isEmpty) continue;
+      final Asset? a = assetFor(i);
+      if (a == null) continue; // orphan: leave it alone rather than lose it
+
+      for (final Reading r in i.readings) {
+        final bool dupe = a.readings.any((Reading e) =>
+            e.value == r.value &&
+            e.at.difference(r.at).inMinutes.abs() < 60 * 12);
+        if (!dupe) a.readings.add(r);
+      }
+      // Inherit the unit from whatever item first brought readings along.
+      if (i.kind == ItemKind.usage) a.unit = i.unit;
+      i.readings = <Reading>[];
+      changed = true;
+    }
+    return changed;
   }
 }
 
@@ -97,5 +130,18 @@ class Store {
     final File f = await _file();
     if (!await f.exists()) return UpkeepData().encode();
     return f.readAsString();
+  }
+
+  /// Writes a backup next to the app's cache and returns the file, ready to
+  /// be handed to the share sheet. Named with the date so a folder full of
+  /// them stays readable.
+  static Future<File> writeBackup(UpkeepData data, DateTime when) async {
+    final Directory dir = await getTemporaryDirectory();
+    final String stamp = '${when.year}-'
+        '${when.month.toString().padLeft(2, '0')}-'
+        '${when.day.toString().padLeft(2, '0')}';
+    final File f = File('${dir.path}/upkeep-backup-$stamp.json');
+    await f.writeAsString(data.encode(), flush: true);
+    return f;
   }
 }

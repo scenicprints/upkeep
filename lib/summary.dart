@@ -27,63 +27,58 @@ class ItemSummary {
   });
 }
 
-ItemSummary summarise(Item item, [DateTime? now]) {
+ItemSummary summarise(Tracked t, [DateTime? now]) {
   final DateTime n = now ?? DateTime.now();
-
-  switch (item.kind) {
+  switch (t.item.kind) {
     case ItemKind.usage:
-      return _usage(item, n);
+      return _usage(t, n);
     case ItemKind.time:
-      return _time(item, n);
+      return _time(t, n);
     case ItemKind.inspect:
-      return _inspect(item, n);
+      return _inspect(t, n);
   }
 }
 
-String _captionFor(Item item, DateTime n) {
-  final GaugeStateName s = _stateName(item, n);
-  return switch (s) {
-    GaugeStateName.overdue => 'OVERDUE',
-    GaugeStateName.ready =>
-      item.kind == ItemKind.inspect ? 'TAKE A LOOK' : 'READY',
-    GaugeStateName.healthy => 'ON SCHEDULE',
-  };
-}
-
-enum GaugeStateName { healthy, ready, overdue }
-
-GaugeStateName _stateName(Item item, DateTime n) {
-  final double p = item.progress(n);
-  // Mirrors Item.state(): an inspect item never reads as overdue, because
-  // the app has no way of knowing that.
-  if (item.kind == ItemKind.inspect) {
-    return p >= 0.9 ? GaugeStateName.ready : GaugeStateName.healthy;
+String _captionFor(Tracked t, DateTime n) {
+  final double p = t.progress(n);
+  if (t.item.kind == ItemKind.inspect) {
+    // Never "overdue": the app cannot know that about brake pads.
+    return p >= 0.9 ? 'TAKE A LOOK' : 'ON SCHEDULE';
   }
-  if (p >= 1.0) return GaugeStateName.overdue;
-  if (p >= 0.9) return GaugeStateName.ready;
-  return GaugeStateName.healthy;
+  if (p >= 1.0) return 'OVERDUE';
+  if (p >= 0.9) return 'READY';
+  return 'ON SCHEDULE';
 }
 
-ItemSummary _usage(Item item, DateTime n) {
+ItemSummary _usage(Tracked t, DateTime n) {
+  final Item item = t.item;
   final double? target = item.target;
-  final String caption = _captionFor(item, n);
+  final String caption = _captionFor(t, n);
+  final DateTime? byMonths = item.monthsDueDate;
 
   if (target == null) {
+    final String every = item.intervalUnits == null
+        ? 'No interval set'
+        : 'Every ${fmtNum(item.intervalUnits!)} ${item.unit}';
     return ItemSummary(
-      headline: item.intervalUnits == null
-          ? 'No interval set'
-          : 'Every ${fmtNum(item.intervalUnits!)} ${item.unit}',
+      headline: item.intervalMonths == null
+          ? every
+          : '$every or ${_months(item.intervalMonths!)}',
       sub: 'Log it once to set the target.',
       caption: caption,
     );
   }
 
-  final String headline = '${fmtNum(target)} ${item.unit}';
+  // Both limits belong in the headline: "whichever comes first" means both
+  // numbers are things you'd check. Both are exact — the months date is
+  // calendar arithmetic off the last service, not a projection.
+  final String headline = byMonths == null
+      ? '${fmtNum(target)} ${item.unit}'
+      : '${fmtNum(target)} ${item.unit} or ${fmtDate(byMonths)}';
 
-  // Sub-line: where we think you are, and roughly when. Both are guesses,
-  // both marked.
-  final double? est = item.estimatedReading(n);
-  final DateTime? due = item.dueDate(n);
+  // Sub-line: where we think you are, and roughly when. Guesses, marked.
+  final double? est = t.estimatedReading(n);
+  final DateTime? due = t.dueDate(n);
   final List<String> bits = <String>[];
 
   if (est != null) {
@@ -96,7 +91,14 @@ ItemSummary _usage(Item item, DateTime n) {
   }
   if (due != null) {
     final int days = due.difference(n).inDays;
-    bits.add(days <= 0 ? 'now' : '~${fmtRelativeDays(days)}');
+    // Only the mileage side is a guess. When the calendar is what trips
+    // first, the date is exact and the "~" would be a lie.
+    final bool exact = t.monthsLeads(n);
+    final String when = days <= 0 ? 'now' : fmtRelativeDays(days);
+    bits.add(exact ? when : (days <= 0 ? 'now' : '~$when'));
+  }
+  if (byMonths != null && t.monthsLeads(n)) {
+    bits.add('months first');
   }
   if (bits.isEmpty) {
     bits.add('Add a reading and it starts guessing the date.');
@@ -109,9 +111,12 @@ ItemSummary _usage(Item item, DateTime n) {
   );
 }
 
-ItemSummary _time(Item item, DateTime n) {
-  final DateTime? due = item.dueDate(n);
-  final String caption = _captionFor(item, n);
+String _months(int m) => m == 1 ? '1 month' : '$m months';
+
+ItemSummary _time(Tracked t, DateTime n) {
+  final Item item = t.item;
+  final DateTime? due = t.dueDate(n);
+  final String caption = _captionFor(t, n);
 
   if (due == null) {
     return ItemSummary(
@@ -133,16 +138,17 @@ ItemSummary _time(Item item, DateTime n) {
   );
 }
 
-ItemSummary _inspect(Item item, DateTime n) {
-  final DateTime? due = item.dueDate(n);
-  final String caption = _captionFor(item, n);
+ItemSummary _inspect(Tracked t, DateTime n) {
+  final Item item = t.item;
+  final DateTime? due = t.dueDate(n);
+  final String caption = _captionFor(t, n);
 
   if (due == null) {
     return ItemSummary(
       headline: item.intervalDays == null
           ? 'No cadence set'
           : 'Look every ${_days(item.intervalDays!)}',
-      sub: "Mark it looked-at once and the cadence starts.",
+      sub: 'Mark it looked-at once and the cadence starts.',
       caption: caption,
     );
   }
@@ -182,18 +188,20 @@ String _days(int d) {
 ///   {asset}  Jenny's RAV4
 ///   {target} 48,000 mi
 ///   {due}    Sep 14
-String renderMessage(Item item, String assetName, [DateTime? now]) {
+String renderMessage(Tracked t, String assetName, [DateTime? now]) {
   final DateTime n = now ?? DateTime.now();
+  final Item item = t.item;
   final String template = (item.messageTemplate ?? '').trim().isEmpty
       ? _defaultTemplate(item)
       : item.messageTemplate!;
-  final double? t = item.target;
-  final DateTime? due = item.dueDate(n);
+  final double? target = item.target;
+  final DateTime? due = t.dueDate(n);
 
   return template
       .replaceAll('{item}', item.name)
       .replaceAll('{asset}', assetName)
-      .replaceAll('{target}', t == null ? '' : '${fmtNum(t)} ${item.unit}')
+      .replaceAll(
+          '{target}', target == null ? '' : '${fmtNum(target)} ${item.unit}')
       .replaceAll('{due}', due == null ? '' : fmtDate(due))
       .replaceAll('  ', ' ')
       .trim();
