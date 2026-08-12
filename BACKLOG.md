@@ -112,6 +112,13 @@ Releases are **batched**. Work lands on a feature branch, gets merged
         built (`lib/github_sync.dart` → `fuelwise-data/data.json`). It had
         simply never been connected, which is why that repo was empty.
 
+- [x] **No token needed: clipboard handoff.** Both apps are on the same
+      phone, so the shortest pipe between them isn't GitHub. FuelWise
+      v0.20.0 gained "Copy log for Upkeep" (same `toStateJson()` payload as
+      its cloud backup, so there's no second format to maintain); Upkeep
+      reads it with one tap. No token, no expiry, no network. The GitHub
+      path stays as the optional automatic route.
+
 ---
 
 ## Later

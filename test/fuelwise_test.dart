@@ -123,6 +123,53 @@ void main() {
     });
   });
 
+  group('the clipboard route', () {
+    // Both apps are on one phone, so this is the default path — it has to
+    // be as trustworthy as the network one.
+    test('a copied log parses into the same snapshot', () {
+      final FuelWiseResult r = FuelWise.parseOrError(fuelwiseJson());
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.vehicles.length, 2);
+      expect(r.snapshot!.fills.length, 3);
+    });
+
+    test('something else on the clipboard is refused, not half-read', () {
+      for (final String junk in <String>[
+        'hello',
+        '{"unrelated": true}',
+        '[]',
+        '{"vehicles": [], "fillups": []}',
+      ]) {
+        final FuelWiseResult r = FuelWise.parseOrError(junk);
+        expect(r.ok, isFalse, reason: 'should refuse: \$junk');
+        expect(r.error, FuelWiseError.clipboardNotFuelWise);
+      }
+    });
+
+    test('an empty log is treated as the wrong thing copied', () {
+      // Silently succeeding with nothing would look like "FuelWise has no
+      // fill-ups", which is a lie about his data.
+      expect(FuelWise.parseOrError('{}').error,
+          FuelWiseError.clipboardNotFuelWise);
+    });
+
+    test('a log with vehicles but no fills is still accepted', () {
+      // A new FuelWise install with a car and no fill-ups yet is real.
+      final FuelWiseResult r = FuelWise.parseOrError(
+          '{"vehicles":[{"id":"v1","name":"RAV4"}],"fillups":[]}');
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.fills, isEmpty);
+    });
+
+    test('the clipboard messages say where to copy from', () {
+      expect(fuelWiseErrorText(FuelWiseError.clipboardEmpty).toLowerCase(),
+          contains('fuelwise'));
+      expect(
+          fuelWiseErrorText(FuelWiseError.clipboardNotFuelWise).toLowerCase(),
+          contains('copy'));
+    });
+  });
+
   group('importing fill-ups', () {
     Asset car() => Asset(id: 'a', name: 'RAV4', unit: 'mi');
 

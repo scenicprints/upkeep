@@ -112,8 +112,10 @@ class _FuelWiseScreenState extends State<FuelWiseScreen> {
                         TextStyle(fontSize: 13, color: kTextDim, height: 1.6),
                   ),
                   const SizedBox(height: 20),
+                  _paste(),
+                  const SizedBox(height: 22),
                   _connection(),
-                  if (_connected && _error != FuelWiseError.none) ...<Widget>[
+                  if (_error != FuelWiseError.none) ...<Widget>[
                     const SizedBox(height: 18),
                     _problem(),
                   ],
@@ -163,21 +165,83 @@ class _FuelWiseScreenState extends State<FuelWiseScreen> {
     );
   }
 
-  Widget _connection() {
+  /// The default route. Two taps, nothing to set up.
+  Widget _paste() {
     return Container(
       padding: const EdgeInsets.all(15),
-      decoration: panelBox(ready: !_connected),
+      decoration: panelBox(ready: _snap == null),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text(_connected ? 'CONNECTED' : 'NOT CONNECTED',
-              style: eyebrow(color: _connected ? kTextFaint : kReadyDim)),
+          Text('FROM THE CLIPBOARD', style: eyebrow(color: kReadyDim)),
+          const SizedBox(height: 8),
+          const Text(
+            'In FuelWise: Settings → Copy log for Upkeep. Then come back '
+            'and tap this.',
+            style: TextStyle(fontSize: 12.5, color: kTextDim, height: 1.5),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 42,
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _busy ? null : _pasteFromClipboard,
+              style: FilledButton.styleFrom(
+                backgroundColor: kReady,
+                foregroundColor: const Color(0xFF171004),
+                disabledBackgroundColor: kTrack,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(11)),
+              ),
+              child: const Text('Paste FuelWise log',
+                  style:
+                      TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _pasteFromClipboard() async {
+    setState(() {
+      _busy = true;
+      _note = null;
+    });
+    final FuelWiseResult res = await FuelWise.fromClipboard();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (res.ok) {
+        _snap = res.snapshot;
+        _error = FuelWiseError.none;
+        _note = 'Read ${res.snapshot!.vehicles.length} vehicle'
+            '${res.snapshot!.vehicles.length == 1 ? '' : 's'} and '
+            '${res.snapshot!.fills.length} fill-ups. Link a car below.';
+      } else {
+        _error = res.error;
+      }
+    });
+  }
+
+  Widget _connection() {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: panelBox(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(_connected ? 'AUTOMATIC — CONNECTED' : 'AUTOMATIC — OPTIONAL',
+              style: eyebrow()),
           const SizedBox(height: 8),
           Text(
             _connected
-                ? 'A read token is stored on this phone.'
-                : 'Upkeep needs a GitHub token that can read '
-                    'fuelwise-data. Contents: Read is enough.',
+                ? 'A read token is stored on this phone, so linked cars top '
+                    'themselves up on every launch.'
+                : 'Optional. With a GitHub token that can read '
+                    'fuelwise-data, Upkeep pulls fill-ups by itself and you '
+                    'never have to copy anything. Needs FuelWise sync '
+                    'switched on first.',
             style: const TextStyle(fontSize: 12.5, color: kTextDim, height: 1.5),
           ),
           const SizedBox(height: 12),
