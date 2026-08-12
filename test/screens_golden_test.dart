@@ -7,6 +7,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:upkeep/app_state.dart';
 import 'package:upkeep/item_detail.dart';
 import 'package:upkeep/backup_screen.dart';
+import 'package:upkeep/fuelwise.dart';
+import 'package:upkeep/fuelwise_screen.dart';
 import 'package:upkeep/item_edit.dart';
 import 'package:upkeep/main.dart';
 import 'package:upkeep/mascot.dart';
@@ -258,6 +260,31 @@ void main() {
     await expectLater(
       find.byType(Mascot),
       matchesGoldenFile('goldens/gremlin_poke.png'),
+    );
+  }, skip: !Platform.isWindows);
+
+  testWidgets('fuelwise — connected with a linked car',
+      (WidgetTester tester) async {
+    await phone(tester);
+    final UpkeepController c = demoController();
+    c.data.liveAssets.first.fuelwiseVehicleId = 'v1';
+    final FuelWiseSnapshot snap = FuelWise.parseSnapshot(
+      '{"vehicles":[{"id":"v1","name":"RAV4","year":2019,"make":"Toyota"},'
+      '{"id":"v2","name":"The Truck"}],'
+      '"fillups":[{"vehicleId":"v1","date":"2026-07-02T00:00:00.000",'
+      '"odometer":41300},{"vehicleId":"v1",'
+      '"date":"2026-08-08T00:00:00.000","odometer":42950},'
+      '{"vehicleId":"v2","date":"2026-08-01T00:00:00.000",'
+      '"odometer":91000}]}',
+    );
+    await tester.pumpWidget(wrap(
+      c,
+      FuelWiseScreen(debugSnapshot: snap, debugConnected: true),
+    ));
+    await tester.pump(const Duration(milliseconds: 400));
+    await expectLater(
+      find.byType(FuelWiseScreen),
+      matchesGoldenFile('goldens/fuelwise.png'),
     );
   }, skip: !Platform.isWindows);
 

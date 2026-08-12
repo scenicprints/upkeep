@@ -41,6 +41,10 @@ class Asset {
   /// What that meter counts: 'mi' or 'hr'.
   String unit;
 
+  /// The FuelWise vehicle whose fill-ups feed this meter, if linked. Every
+  /// fill-up records an odometer, so a linked car stops needing to be asked.
+  String? fuelwiseVehicleId;
+
   bool deleted;
   int updatedAtMs;
 
@@ -49,6 +53,7 @@ class Asset {
     required this.name,
     List<Reading>? readings,
     this.unit = 'mi',
+    this.fuelwiseVehicleId,
     this.deleted = false,
     int? updatedAtMs,
   })  : readings = readings ?? <Reading>[],
@@ -72,6 +77,7 @@ class Asset {
         'name': name,
         'readings': readings.map((Reading r) => r.toJson()).toList(),
         'unit': unit,
+        'fuelwise_vehicle_id': fuelwiseVehicleId,
         'deleted': deleted,
         'updated_at_ms': updatedAtMs,
       };
@@ -83,6 +89,7 @@ class Asset {
             .map((dynamic e) => Reading.fromJson(e as Map<String, dynamic>))
             .toList(),
         unit: (j['unit'] as String?) ?? 'mi',
+        fuelwiseVehicleId: j['fuelwise_vehicle_id'] as String?,
         deleted: (j['deleted'] as bool?) ?? false,
         updatedAtMs: (j['updated_at_ms'] as num?)?.toInt(),
       );
@@ -97,22 +104,39 @@ class Reading {
   final DateTime at;
   final double value;
 
-  Reading({String? id, required this.at, required this.value})
-      : id = id ?? newId();
+  /// Where the number came from: 'manual' when you typed it, 'fuelwise'
+  /// when it was imported from a fill-up. Kept so an import can be told
+  /// apart from your own entry, and undone without touching yours.
+  final String source;
 
-  Reading copyWith({DateTime? at, double? value}) =>
-      Reading(id: id, at: at ?? this.at, value: value ?? this.value);
+  Reading({
+    String? id,
+    required this.at,
+    required this.value,
+    this.source = 'manual',
+  }) : id = id ?? newId();
+
+  bool get imported => source != 'manual';
+
+  Reading copyWith({DateTime? at, double? value}) => Reading(
+        id: id,
+        at: at ?? this.at,
+        value: value ?? this.value,
+        source: source,
+      );
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         'id': id,
         'at': at.toIso8601String(),
         'value': value,
+        'source': source,
       };
 
   static Reading fromJson(Map<String, dynamic> j) => Reading(
         id: j['id'] as String?,
         at: DateTime.parse(j['at'] as String),
         value: (j['value'] as num).toDouble(),
+        source: (j['source'] as String?) ?? 'manual',
       );
 }
 

@@ -93,10 +93,29 @@ Releases are **batched**. Work lands on a feature branch, gets merged
 
 ---
 
+## v0.5.0 — batch in progress (branch `feature/batch-v0.5`)
+
+### Done
+- [x] **FuelWise bridge.** Reads `fuelwise-data/data.json` and turns every
+      fill-up's odometer into a reading on the linked car. Settings →
+      FuelWise: paste a token, link each FuelWise vehicle to an Upkeep car,
+      pull. Also pulls quietly on launch.
+      - **Strictly read-only.** FuelWise owns that file; a write from here
+        would clobber the app that maintains it.
+      - **Token is entered by hand into secure storage, never baked in.**
+        This repo is public, so anything compiled into the APK can be pulled
+        straight back out — and fuelwise-data holds GPS traces.
+      - Imports are additive and idempotent (safe on every launch), tagged
+        `source: fuelwise`, and never touch a reading you typed. Unlinking
+        removes only the imports.
+      - No code change was needed in FuelWise: it already has GitHub sync
+        built (`lib/github_sync.dart` → `fuelwise-data/data.json`). It had
+        simply never been connected, which is why that repo was empty.
+
+---
+
 ## Later
-- [ ] **FuelWise bridge.** `scenicprints/fuelwise` already records an
-      `odometer` on every fill-up, so Upkeep could stop asking about his own
-      car. Blocked: `fuelwise-data` is empty except a README — FuelWise isn't
-      publishing its log yet, so this needs a change in both apps.
-- [ ] Export / backup so a dead phone doesn't cost the entries.
 - [ ] Photos on an item (the filter size, the part on the shelf).
+- [ ] Group the cluster by asset rather than pure urgency.
+- [ ] Snooze — defer an item without logging it as done.
+- [ ] A note on a logged service (the field exists; there's no box for it).

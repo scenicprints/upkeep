@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'app_state.dart';
 import 'backup_screen.dart';
+import 'fuelwise_screen.dart';
 import 'gauge.dart';
 import 'history_screen.dart';
 import 'item_detail.dart';
@@ -100,6 +101,10 @@ class _ClusterScreenState extends State<ClusterScreen> {
         if (mounted) autoCheck(context);
       });
       Notifications.requestPermission();
+      // Quietly top up any linked car's meter. Additive and idempotent, and
+      // it never surfaces an error — if FuelWise can't be reached the app
+      // just carries on with the readings it already has.
+      UpkeepScope.of(context).refreshFuelWiseQuietly();
     });
   }
 
@@ -585,6 +590,19 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           const SizedBox(height: 22),
           Text('YOUR DATA', style: eyebrow()),
           const SizedBox(height: 6),
+          _row(
+            icon: Icons.local_gas_station_rounded,
+            label: 'FuelWise',
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push<void>(
+                context,
+                MaterialPageRoute<void>(
+                    builder: (_) => const FuelWiseScreen()),
+              );
+            },
+          ),
+          const Divider(height: 1, color: kHairline),
           _row(
             icon: Icons.save_alt_rounded,
             label: 'Backup & restore',
