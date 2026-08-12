@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:open_filex/open_filex.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -71,11 +72,19 @@ int compareVersions(String a, String b) {
 Future<String> currentVersion() async =>
     (await PackageInfo.fromPlatform()).version;
 
+/// The HTTP status of the most recent release check, kept purely so a
+/// failure can say WHICH failure it was. "Could not reach GitHub" reads the
+/// same whether you're offline or rate-limited, and those need different
+/// things from you.
+int? lastReleaseStatus;
+
 Future<UpdateInfo?> fetchLatestRelease() async {
+  lastReleaseStatus = null;
   final http.Response res = await http.get(
     Uri.parse('https://api.github.com/repos/$kRepo/releases/latest'),
     headers: <String, String>{'Accept': 'application/vnd.github+json'},
   ).timeout(const Duration(seconds: 12));
+  lastReleaseStatus = res.statusCode;
   if (res.statusCode != 200) return null;
   final Map<String, dynamic> data =
       json.decode(res.body) as Map<String, dynamic>;
@@ -133,22 +142,79 @@ Future<void> manualCheck(BuildContext context) async {
   if (!context.mounted) return;
   messenger.hideCurrentSnackBar();
   if (latest == null) {
-    messenger.showSnackBar(const SnackBar(
-        content: Text('Could not reach GitHub. Check your connection.')));
+    final int? code = lastReleaseStatus;
+    messenger.showSnackBar(SnackBar(
+      content: Text(switch (code) {
+        403 || 429 => 'GitHub is rate-limiting this network. Try again in '
+            'an hour, or on mobile data.',
+        404 => 'No published release found.',
+        null => 'Could not reach GitHub. Are you online?',
+        _ => 'GitHub answered $code. Try again shortly.',
+      }),
+    ));
     return;
   }
   if (compareVersions(latest.version, current) > 0) {
     await showUpdateSheet(context, latest);
   } else {
     messenger.showSnackBar(
-        SnackBar(content: Text("You're on the latest version (v$current).")));
+        // Says BOTH numbers on purpose: "you're on the latest" hides what
+        // it actually found, which is the one thing worth knowing when the
+        // updater is misbehaving.
+        SnackBar(
+            content:
+                Text("You're on v$current — latest is v${latest.version}.")));
   }
 }
 
-Future<void> downloadAndInstall(
+/// Why an install couldn't be started. Each needs a different thing from
+/// the user, so they are kept apart instead of collapsed into "failed".
+enum InstallProblem { none, notAllowed, noInstaller, failed }
+
+String installProblemText(InstallProblem p) => switch (p) {
+      InstallProblem.none => '',
+      InstallProblem.notAllowed =>
+        'Android blocks apps from installing apps until you allow it. '
+            'Turn on "Install unknown apps" for Upkeep, then try again.',
+      InstallProblem.noInstaller =>
+        "Android didn't offer to install the file. Use the release page "
+            'below and install the APK from your browser instead.',
+      InstallProblem.failed =>
+        "The installer wouldn't open. Use the release page below instead.",
+    };
+
+/// True once Android will let Upkeep hand an APK to the package installer.
+/// Asking triggers the system screen; there's no silent grant for this.
+Future<bool> canInstallApks({bool ask = true}) async {
+  try {
+    if (await Permission.requestInstallPackages.isGranted) return true;
+    if (!ask) return false;
+    final PermissionStatus s =
+        await Permission.requestInstallPackages.request();
+    return s.isGranted;
+  } catch (_) {
+    // If the plugin can't answer, don't block the attempt — the install
+    // itself will report the real problem.
+    return true;
+  }
+}
+
+Future<void> openInstallSettings() async {
+  try {
+    await openAppSettings();
+  } catch (_) {}
+}
+
+Future<InstallProblem> downloadAndInstall(
   UpdateInfo info, {
   void Function(double? progress, String status)? onStatus,
 }) async {
+  // Ask BEFORE spending a 50MB download on something Android will refuse
+  // to open at the end.
+  onStatus?.call(null, 'Checking permission…');
+  if (!await canInstallApks()) {
+    return InstallProblem.notAllowed;
+  }
   final String url = info.apkUrl ?? info.releaseUrl;
   final http.Client client = http.Client();
   try {
@@ -180,8 +246,19 @@ Future<void> downloadAndInstall(
     }
     await sink.close();
     onStatus?.call(1.0, 'Opening installer…');
-    await OpenFilex.open(file.path,
+
+    // The result was previously thrown away, which is why a refused install
+    // looked like the app hanging on "Opening installer…" with nothing to
+    // act on. Never ignore it again.
+    final OpenResult r = await OpenFilex.open(file.path,
         type: 'application/vnd.android.package-archive');
+    debugPrint('Upkeep: installer result ${r.type} ${r.message}');
+    return switch (r.type) {
+      ResultType.done => InstallProblem.none,
+      ResultType.permissionDenied => InstallProblem.notAllowed,
+      ResultType.noAppToOpen => InstallProblem.noInstaller,
+      _ => InstallProblem.failed,
+    };
   } finally {
     client.close();
   }
@@ -219,22 +296,35 @@ class _UpdateSheetState extends State<_UpdateSheet> {
   String _status = '';
   String? _error;
 
+  InstallProblem _problem = InstallProblem.none;
+
   Future<void> _install() async {
     setState(() {
       _busy = true;
       _error = null;
+      _problem = InstallProblem.none;
       _status = 'Connecting…';
     });
     try {
-      await downloadAndInstall(widget.info,
-          onStatus: (double? p, String s) {
+      final InstallProblem p = await downloadAndInstall(widget.info,
+          onStatus: (double? prog, String s) {
         if (mounted) {
           setState(() {
-            _progress = p;
+            _progress = prog;
             _status = s;
           });
         }
       });
+      if (!mounted) return;
+      if (p != InstallProblem.none) {
+        // Previously this case looked identical to success: the sheet sat
+        // on "Opening installer…" and nothing ever happened.
+        setState(() {
+          _busy = false;
+          _problem = p;
+          _error = installProblemText(p);
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -290,7 +380,31 @@ class _UpdateSheetState extends State<_UpdateSheet> {
           if (_error != null) ...<Widget>[
             const SizedBox(height: 14),
             Text(_error!,
-                style: const TextStyle(fontSize: 12.5, color: kOverdue)),
+                style: const TextStyle(
+                    fontSize: 12.5, color: kOverdue, height: 1.5)),
+            const SizedBox(height: 10),
+            Row(children: <Widget>[
+              if (_problem == InstallProblem.notAllowed)
+                OutlinedButton(
+                  onPressed: openInstallSettings,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kReady,
+                    side: const BorderSide(color: kReadyEdge),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('Open the setting',
+                      style: TextStyle(fontSize: 12.5)),
+                ),
+              if (_problem == InstallProblem.notAllowed)
+                const SizedBox(width: 8),
+              TextButton(
+                onPressed: openReleases,
+                style: TextButton.styleFrom(foregroundColor: kTextDim),
+                child: const Text('Release page',
+                    style: TextStyle(fontSize: 12.5)),
+              ),
+            ]),
           ],
           const SizedBox(height: 20),
           if (_busy) ...<Widget>[

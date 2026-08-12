@@ -49,6 +49,30 @@ void main() {
     });
   });
 
+  group('install problems', () {
+    test('every problem says something actionable', () {
+      // A silently ignored install result is what made "update" look like
+      // it did nothing at all. Each cause needs its own way out.
+      for (final InstallProblem p in InstallProblem.values) {
+        if (p == InstallProblem.none) continue;
+        expect(installProblemText(p), isNotEmpty);
+      }
+      expect(installProblemText(InstallProblem.none), isEmpty);
+    });
+
+    test('the blocked-by-Android case names the setting to turn on', () {
+      expect(installProblemText(InstallProblem.notAllowed).toLowerCase(),
+          contains('install unknown apps'));
+    });
+
+    test('the other cases point at the release page as a way out', () {
+      expect(installProblemText(InstallProblem.noInstaller).toLowerCase(),
+          contains('release page'));
+      expect(installProblemText(InstallProblem.failed).toLowerCase(),
+          contains('release page'));
+    });
+  });
+
   test('the release repo is Upkeep, not a copy-pasted sibling app', () {
     // Every app here starts from the last one's updater; pointing at the
     // wrong repo would silently ship someone else's APK.

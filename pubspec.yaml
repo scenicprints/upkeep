@@ -26,6 +26,7 @@ dependencies:
   timezone: ^0.10.0                 # required by scheduled notifications
   share_plus: ^10.1.4               # hand a backup file to Drive/Gmail/etc
   flutter_secure_storage: ^9.2.2    # the FuelWise read token, never in git
+  permission_handler: ^11.3.1       # 'install unknown apps', for the updater
 
 dev_dependencies:
   flutter_test:
