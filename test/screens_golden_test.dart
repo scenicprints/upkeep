@@ -9,6 +9,7 @@ import 'package:upkeep/item_detail.dart';
 import 'package:upkeep/backup_screen.dart';
 import 'package:upkeep/item_edit.dart';
 import 'package:upkeep/main.dart';
+import 'package:upkeep/mascot.dart';
 import 'package:upkeep/models.dart';
 import 'package:upkeep/readings_screen.dart';
 import 'package:upkeep/store.dart';
@@ -210,6 +211,53 @@ void main() {
     await expectLater(
       find.byType(BackupScreen),
       matchesGoldenFile('goldens/backup.png'),
+    );
+  }, skip: !Platform.isWindows);
+
+  testWidgets('gremlin — every mood', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          backgroundColor: kBg,
+          body: Center(
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: <Widget>[
+                for (final MascotMood m in MascotMood.values)
+                  Mascot(size: 132, mood: m),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 1500));
+    await expectLater(
+      find.byType(Row).first,
+      matchesGoldenFile('goldens/gremlin_moods.png'),
+    );
+  }, skip: !Platform.isWindows);
+
+  testWidgets('gremlin — mid-poke', (WidgetTester tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        debugShowCheckedModeBanner: false,
+        home: Scaffold(
+          backgroundColor: kBg,
+          body: Center(child: Mascot(size: 300, mood: MascotMood.alert)),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 900));
+    await tester.tap(find.byType(Mascot));
+    // Land near the top of the hop.
+    for (int i = 0; i < 7; i++) {
+      await tester.pump(const Duration(milliseconds: 50));
+    }
+    await expectLater(
+      find.byType(Mascot),
+      matchesGoldenFile('goldens/gremlin_poke.png'),
     );
   }, skip: !Platform.isWindows);
 

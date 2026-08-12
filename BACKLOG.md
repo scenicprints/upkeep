@@ -70,11 +70,26 @@ Releases are **batched**. Work lands on a feature branch, gets merged
       project builds on.
 
 ### Candidates
-- [ ] Mascot moods wired to the real worst-state on the panel
-      (`UpkeepController.worstState` is already there, unused).
 - [ ] Group the cluster by asset rather than pure urgency.
 - [ ] Snooze — defer an item without logging it as done.
 - [ ] A note on a logged service (the field exists; there's no box for it).
+
+---
+
+## v0.4.0 — batch in progress (branch `feature/batch-v0.4`)
+
+### Done
+- [x] **The gremlin reads the panel.** Four moods (idle / content / alert /
+      overdue) driven by `moodFor(controller.worstState)`. His eyes take the
+      worst state's colour and his mouth changes with it; the wrench sways
+      faster the worse things get. He now rides in the cluster header at
+      42px as a live wordmark — no new information, since the counts below
+      already say it, but the screen has a pulse before you've read a word.
+      Nothing tracked keeps him idle rather than worried.
+- [x] **Poke him.** Tap the gremlin and he startles: eyes wide, a hop with
+      stretch in the air and a compress on landing, and the wrench spins a
+      full turn. Light haptic. Squash-and-stretch the right way round —
+      flattening at the top of a jump reads as a pancake.
 
 ---
 

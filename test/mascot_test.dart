@@ -11,9 +11,10 @@ void main() {
     await tester.pumpWidget(UpkeepApp(controller: UpkeepController()..loaded = true));
     await tester.pump(const Duration(milliseconds: 100));
 
-    // The mascot is the empty state — if he ever stops rendering, the
-    // screen is blank and nobody notices from a green test run.
-    expect(find.byType(Mascot), findsOneWidget);
+    // Two gremlins on an empty panel: the big one that IS the empty state,
+    // and the small one riding in the header. If he ever stops rendering,
+    // the screen is blank and nobody notices from a green test run.
+    expect(find.byType(Mascot), findsNWidgets(2));
     expect(find.text('NOTHING ON THE PANEL'), findsOneWidget);
     expect(find.text('UPKEEP'), findsOneWidget);
   });
@@ -30,6 +31,17 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
     }
     expect(tester.takeException(), isNull);
+  });
+
+  test('the gremlin reads the worst thing on the panel', () {
+    // His eyes are the fastest read on the screen — they must never be
+    // calmer than the panel actually is.
+    expect(moodFor(GaugeState.healthy, anyItems: false), MascotMood.idle);
+    expect(moodFor(GaugeState.overdue, anyItems: false), MascotMood.idle,
+        reason: 'nothing tracked means nothing to be worried about');
+    expect(moodFor(GaugeState.healthy, anyItems: true), MascotMood.content);
+    expect(moodFor(GaugeState.ready, anyItems: true), MascotMood.alert);
+    expect(moodFor(GaugeState.overdue, anyItems: true), MascotMood.overdue);
   });
 
   test('every mood maps to a gauge colour', () {
