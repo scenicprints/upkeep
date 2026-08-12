@@ -209,12 +209,10 @@ Future<InstallProblem> downloadAndInstall(
   UpdateInfo info, {
   void Function(double? progress, String status)? onStatus,
 }) async {
-  // Ask BEFORE spending a 50MB download on something Android will refuse
-  // to open at the end.
-  onStatus?.call(null, 'Checking permission…');
-  if (!await canInstallApks()) {
-    return InstallProblem.notAllowed;
-  }
+  // Deliberately NOT gated on a permission check any more. Asking first
+  // seemed tidy — don't spend 50MB on something Android will refuse — but
+  // if that request comes back anything other than granted, the download
+  // never starts and the update simply doesn't happen. Try, then explain.
   final String url = info.apkUrl ?? info.releaseUrl;
   final http.Client client = http.Client();
   try {
@@ -262,6 +260,32 @@ Future<InstallProblem> downloadAndInstall(
   } finally {
     client.close();
   }
+}
+
+/// Hands the APK to the browser.
+///
+/// This is the path that is KNOWN to work on the phone: every manual
+/// install so far has gone through the browser, which already has
+/// permission to install apps. In-app installing is the convenience;
+/// this is the one that has to be reliable.
+Future<bool> openApkInBrowser(UpdateInfo info) async {
+  final String url = info.apkUrl ?? info.releaseUrl;
+  try {
+    return await launchUrl(Uri.parse(url),
+        mode: LaunchMode.externalApplication);
+  } catch (_) {
+    return false;
+  }
+}
+
+/// Same, without needing a fetched release in hand.
+Future<void> openLatestApkInBrowser() async {
+  final UpdateInfo? info = await fetchLatestRelease();
+  if (info != null) {
+    await openApkInBrowser(info);
+    return;
+  }
+  await openReleases();
 }
 
 Future<void> openReleases() async {
@@ -423,38 +447,70 @@ class _UpdateSheetState extends State<_UpdateSheet> {
             const Text('The installer opens by itself when it lands.',
                 style: TextStyle(fontSize: 11.5, color: kTextFaint)),
           ] else
-            Row(
+            Column(
               children: <Widget>[
-                Expanded(
-                  child: SizedBox(
-                    height: 46,
-                    child: FilledButton(
-                      onPressed: _install,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: kReady,
-                        foregroundColor: const Color(0xFF171004),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text('Download & install',
-                          style: TextStyle(
-                              fontSize: 14.5, fontWeight: FontWeight.w600)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
+                // The browser is the route that has actually worked on this
+                // phone every single time. It leads.
                 SizedBox(
                   height: 46,
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: kTextDim,
-                      side: const BorderSide(color: kPanelEdge),
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () async {
+                      final bool ok = await openApkInBrowser(widget.info);
+                      if (!ok && mounted) {
+                        setState(() => _error =
+                            "Couldn't open a browser. Try the release page.");
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: kReady,
+                      foregroundColor: const Color(0xFF171004),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text('Later'),
+                    child: const Text('Download in browser',
+                        style: TextStyle(
+                            fontSize: 14.5, fontWeight: FontWeight.w600)),
                   ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: SizedBox(
+                        height: 42,
+                        child: OutlinedButton(
+                          onPressed: _install,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: kTextDim,
+                            side: const BorderSide(color: kPanelEdge),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(11)),
+                          ),
+                          child: const Text('Install in the app',
+                              style: TextStyle(fontSize: 13)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 42,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: TextButton.styleFrom(
+                            foregroundColor: kTextFaint),
+                        child: const Text('Later'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'The browser downloads it and you tap the file. That path '
+                  'always works; installing in the app is just fewer taps '
+                  'when Android allows it.',
+                  style: TextStyle(
+                      fontSize: 10.5, color: kTextFaint, height: 1.45),
                 ),
               ],
             ),

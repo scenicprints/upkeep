@@ -580,6 +580,18 @@ class _SettingsSheetState extends State<_SettingsSheet> {
           ),
           const Divider(height: 1, color: kHairline),
           _row(
+            // Always available, and independent of everything the in-app
+            // installer does. If updating ever misbehaves again, this is
+            // the way through.
+            icon: Icons.download_rounded,
+            label: 'Download latest in browser',
+            onTap: () {
+              Navigator.pop(context);
+              openLatestApkInBrowser();
+            },
+          ),
+          const Divider(height: 1, color: kHairline),
+          _row(
             icon: Icons.open_in_new_rounded,
             label: 'Release history on GitHub',
             onTap: () {
