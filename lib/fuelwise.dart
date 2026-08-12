@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
@@ -12,13 +13,20 @@ import 'models.dart';
 // FuelWise records an odometer on every fill-up. Those are readings Upkeep
 // would otherwise have to ask for, so a linked car stops being asked.
 //
-// STRICTLY READ-ONLY. Upkeep fetches fuelwise-data/data.json and never
-// writes a byte back — FuelWise owns that file, and a stray write from
-// here would clobber the app that actually maintains it.
+// TWO WAYS IN, and the simple one is the default:
 //
-// The token is entered by hand and lives in secure storage. It is NOT
-// baked into the build: this repo is public, so anything compiled in can
-// be pulled straight out of the APK — and fuelwise-data holds GPS traces.
+//   CLIPBOARD — both apps are on the same phone, so the shortest pipe
+//   between them isn't GitHub at all. Copy in FuelWise, paste here. No
+//   token, no expiry, no network, nothing to leak.
+//
+//   GITHUB — optional, for people who want it automatic. Reads
+//   fuelwise-data/data.json with a token entered by hand into secure
+//   storage. NEVER baked into the build: this repo is public, so anything
+//   compiled in can be pulled straight out of the APK, and that repo holds
+//   GPS traces.
+//
+// Both are STRICTLY READ-ONLY. FuelWise owns its data; a stray write from
+// here would clobber the app that actually maintains it.
 // ═══════════════════════════════════════════════════════════════════════
 
 const String kFuelWiseRepo = 'scenicprints/fuelwise-data';
@@ -79,6 +87,8 @@ enum FuelWiseError {
   notPublishedYet,
   network,
   malformed,
+  clipboardEmpty,
+  clipboardNotFuelWise,
 }
 
 String fuelWiseErrorText(FuelWiseError e) => switch (e) {
@@ -92,6 +102,12 @@ String fuelWiseErrorText(FuelWiseError e) => switch (e) {
             'its sync, and it will push data.json — then try again.',
       FuelWiseError.network => "Couldn't reach GitHub. Are you online?",
       FuelWiseError.malformed => "data.json isn't in a shape Upkeep knows.",
+      FuelWiseError.clipboardEmpty =>
+        'Nothing on the clipboard. In FuelWise: Settings → '
+            'Copy log for Upkeep, then come back and tap Paste.',
+      FuelWiseError.clipboardNotFuelWise =>
+        "What's on the clipboard isn't a FuelWise log. Copy it again from "
+            'FuelWise → Settings → Copy log for Upkeep.',
     };
 
 class FuelWiseResult {
@@ -125,7 +141,43 @@ class FuelWise {
 
   static Future<void> clearToken() => _storage.delete(key: _tokenKey);
 
-  /// Fetches and parses FuelWise's data.json. Read-only; no writes, ever.
+  /// Reads a snapshot straight off the clipboard.
+  ///
+  /// Both apps live on the same phone, so the shortest pipe between them
+  /// isn't GitHub at all — it's copy over there, paste here. No token, no
+  /// expiry, no network, nothing to configure, and nothing to leak.
+  static Future<FuelWiseResult> fromClipboard() async {
+    ClipboardData? d;
+    try {
+      d = await Clipboard.getData(Clipboard.kTextPlain);
+    } catch (_) {
+      return const FuelWiseResult(error: FuelWiseError.clipboardEmpty);
+    }
+    final String text = (d?.text ?? '').trim();
+    if (text.isEmpty) {
+      return const FuelWiseResult(error: FuelWiseError.clipboardEmpty);
+    }
+    return parseOrError(text);
+  }
+
+  /// Shared by the clipboard and network paths. A payload that parses but
+  /// contains nothing is treated as "wrong thing copied", not as success —
+  /// otherwise a stray clipboard would silently look like an empty log.
+  static FuelWiseResult parseOrError(String text) {
+    try {
+      final FuelWiseSnapshot snap = parseSnapshot(text);
+      if (snap.vehicles.isEmpty && snap.fills.isEmpty) {
+        return const FuelWiseResult(
+            error: FuelWiseError.clipboardNotFuelWise);
+      }
+      return FuelWiseResult(snapshot: snap);
+    } catch (_) {
+      return const FuelWiseResult(error: FuelWiseError.clipboardNotFuelWise);
+    }
+  }
+
+  /// The optional automatic path: fetches data.json from the private repo.
+  /// Read-only; no writes, ever.
   static Future<FuelWiseResult> fetch() async {
     final String? t = await token();
     if (t == null || t.trim().isEmpty) {
