@@ -227,8 +227,19 @@ class UpkeepController extends ChangeNotifier {
 
   /// Silent refresh on launch. Never surfaces an error — if FuelWise isn't
   /// reachable the app simply carries on with what it already has.
+  ///
+  /// Tries the phone first: FuelWise is right there, needs no token and no
+  /// network. The GitHub route is only a fallback for when it isn't
+  /// installed (a second phone, say).
   Future<void> refreshFuelWiseQuietly() async {
     if (linkedAssets.isEmpty) return;
+
+    final FuelWiseResult onDevice = await FuelWise.fromDevice();
+    if (onDevice.ok) {
+      await importFromFuelWise(onDevice.snapshot!);
+      return;
+    }
+
     if (!await FuelWise.connected) return;
     final FuelWiseResult res = await FuelWise.fetch();
     if (res.ok) await importFromFuelWise(res.snapshot!);

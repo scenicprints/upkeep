@@ -32,6 +32,7 @@ class _FuelWiseScreenState extends State<FuelWiseScreen> {
   bool _connected = false;
   bool _busy = false;
   FuelWiseSnapshot? _snap;
+  bool _onDevice = false;
   FuelWiseError _error = FuelWiseError.none;
   String? _note;
 
@@ -52,7 +53,35 @@ class _FuelWiseScreenState extends State<FuelWiseScreen> {
     final bool c = await FuelWise.connected;
     if (!mounted) return;
     setState(() => _connected = c);
-    if (c) await _refresh();
+
+    // Try the phone first — it's the route that needs nothing set up.
+    await _readDevice(quiet: true);
+    if (_snap == null && c) await _refresh();
+  }
+
+  /// Reads FuelWise directly off the device. [quiet] is for the automatic
+  /// attempt on open, where an unavailable neighbour isn't worth an error.
+  Future<void> _readDevice({bool quiet = false}) async {
+    if (!quiet) {
+      setState(() {
+        _busy = true;
+        _note = null;
+      });
+    }
+    final FuelWiseResult res = await FuelWise.fromDevice();
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      if (res.ok) {
+        _snap = res.snapshot;
+        _error = FuelWiseError.none;
+        _onDevice = true;
+      } else if (!quiet) {
+        _error = res.error;
+      }
+    });
+    // Nothing to link yet is not a failure worth shouting about.
+    if (res.ok && !quiet) await _pull(UpkeepScope.of(context));
   }
 
   Future<void> _refresh() async {
@@ -112,9 +141,16 @@ class _FuelWiseScreenState extends State<FuelWiseScreen> {
                         TextStyle(fontSize: 13, color: kTextDim, height: 1.6),
                   ),
                   const SizedBox(height: 20),
-                  _paste(),
-                  const SizedBox(height: 22),
-                  _connection(),
+                  _onPhone(),
+                  // The fallbacks only exist for when the direct route
+                  // can't work. Once it does, showing three ways to do the
+                  // same thing is just noise.
+                  if (!_onDevice) ...<Widget>[
+                    const SizedBox(height: 22),
+                    _paste(),
+                    const SizedBox(height: 22),
+                    _connection(),
+                  ],
                   if (_error != FuelWiseError.none) ...<Widget>[
                     const SizedBox(height: 18),
                     _problem(),
@@ -165,7 +201,51 @@ class _FuelWiseScreenState extends State<FuelWiseScreen> {
     );
   }
 
-  /// The default route. Two taps, nothing to set up.
+  /// The route that needs nothing at all: FuelWise is on this phone, so
+  /// just ask it.
+  Widget _onPhone() {
+    return Container(
+      padding: const EdgeInsets.all(15),
+      decoration: panelBox(ready: !_onDevice),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(_onDevice ? 'ON THIS PHONE — WORKING' : 'ON THIS PHONE',
+              style: eyebrow(color: _onDevice ? kTextFaint : kReadyDim)),
+          const SizedBox(height: 8),
+          Text(
+            _onDevice
+                ? 'Upkeep reads the odometer straight from FuelWise. '
+                    'Nothing to set up, and it stays current by itself.'
+                : 'If FuelWise is installed and up to date, Upkeep can read '
+                    'the odometer straight from it — no token, no copying.',
+            style:
+                const TextStyle(fontSize: 12.5, color: kTextDim, height: 1.5),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            height: 42,
+            width: double.infinity,
+            child: FilledButton(
+              onPressed: _busy ? null : () => _readDevice(),
+              style: FilledButton.styleFrom(
+                backgroundColor: kReady,
+                foregroundColor: const Color(0xFF171004),
+                disabledBackgroundColor: kTrack,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(11)),
+              ),
+              child: Text(_onDevice ? 'Read it again' : 'Read from FuelWise',
+                  style: const TextStyle(
+                      fontSize: 13.5, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Fallback for when the two apps aren't on the same phone.
   Widget _paste() {
     return Container(
       padding: const EdgeInsets.all(15),
@@ -173,7 +253,7 @@ class _FuelWiseScreenState extends State<FuelWiseScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          Text('FROM THE CLIPBOARD', style: eyebrow(color: kReadyDim)),
+          Text('OR PASTE IT', style: eyebrow()),
           const SizedBox(height: 8),
           const Text(
             'In FuelWise: Settings → Copy log for Upkeep. Then come back '

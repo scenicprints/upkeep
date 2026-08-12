@@ -65,5 +65,10 @@
             <action android:name="android.intent.action.SENDTO" />
             <data android:scheme="smsto" />
         </intent>
+        <!-- Android 11+ hides other apps unless they're declared here.
+             Without this, querying FuelWise's provider fails even though
+             the provider is exported. -->
+        <package android:name="com.fuelwise.fuelwise" />
+        <provider android:authorities="com.fuelwise.fuelwise.upkeep" />
     </queries>
 </manifest>

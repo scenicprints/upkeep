@@ -119,6 +119,18 @@ Releases are **batched**. Work lands on a feature branch, gets merged
       reads it with one tap. No token, no expiry, no network. The GitHub
       path stays as the optional automatic route.
 
+- [x] **No setup at all: read FuelWise directly off the phone.** FuelWise
+      v0.21.0 exposes a ContentProvider (`com.fuelwise.fuelwise.upkeep`);
+      Upkeep queries it through a MethodChannel in MainActivity. No token,
+      no copying, no network, and it works while FuelWise isn't running
+      because the provider reads stored state. The provider hands over only
+      vehicles + each fill-up's odometer/date — trips and GPS traces never
+      leave FuelWise — and is strictly read-only.
+      Needs `<queries><package>` in Upkeep's manifest or Android 11+ package
+      visibility blocks it. Clipboard and token routes stay as fallbacks and
+      are hidden once the direct route works.
+      ⚠ UNVERIFIED ON DEVICE — native code on both sides, untestable here.
+
 ---
 
 ## Later

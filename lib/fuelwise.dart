@@ -89,6 +89,9 @@ enum FuelWiseError {
   malformed,
   clipboardEmpty,
   clipboardNotFuelWise,
+  fuelwiseNotFound,
+  fuelwiseTooOld,
+  fuelwiseEmpty,
 }
 
 String fuelWiseErrorText(FuelWiseError e) => switch (e) {
@@ -108,6 +111,15 @@ String fuelWiseErrorText(FuelWiseError e) => switch (e) {
       FuelWiseError.clipboardNotFuelWise =>
         "What's on the clipboard isn't a FuelWise log. Copy it again from "
             'FuelWise → Settings → Copy log for Upkeep.',
+      FuelWiseError.fuelwiseNotFound =>
+        "Can't find FuelWise on this phone. Install it, or update it to "
+            'v0.21.0 or newer — that version is the one that lets Upkeep '
+            'read the odometer.',
+      FuelWiseError.fuelwiseTooOld =>
+        'FuelWise is installed but too old to share its log. Update it to '
+            'v0.21.0 or newer.',
+      FuelWiseError.fuelwiseEmpty =>
+        "FuelWise doesn't have any fill-ups logged yet.",
     };
 
 class FuelWiseResult {
@@ -140,6 +152,35 @@ class FuelWise {
       _storage.write(key: _tokenKey, value: value.trim());
 
   static Future<void> clearToken() => _storage.delete(key: _tokenKey);
+
+  static const MethodChannel _channel = MethodChannel('upkeep/fuelwise');
+
+  /// Asks FuelWise for the log directly. Both apps are on the same phone,
+  /// so this needs no token, no network and nothing to set up — and it
+  /// works whether or not FuelWise is running.
+  ///
+  /// FuelWise hands over only the cars and each fill-up's odometer and
+  /// date; its trips and GPS traces stay in that app.
+  static Future<FuelWiseResult> fromDevice() async {
+    String? raw;
+    try {
+      raw = await _channel.invokeMethod<String>('readLog');
+    } catch (_) {
+      // No channel (a build without it) — treat as unavailable, not fatal.
+      return const FuelWiseResult(error: FuelWiseError.fuelwiseNotFound);
+    }
+    if (raw == null || raw.trim().isEmpty) {
+      // Can't tell "not installed" from "installed but old" from here; the
+      // message covers both, since the fix is the same either way.
+      return const FuelWiseResult(error: FuelWiseError.fuelwiseNotFound);
+    }
+    final FuelWiseResult parsed = parseOrError(raw);
+    if (!parsed.ok) return parsed;
+    if (parsed.snapshot!.fills.isEmpty && parsed.snapshot!.vehicles.isEmpty) {
+      return const FuelWiseResult(error: FuelWiseError.fuelwiseEmpty);
+    }
+    return parsed;
+  }
 
   /// Reads a snapshot straight off the clipboard.
   ///

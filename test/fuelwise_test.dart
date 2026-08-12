@@ -170,6 +170,56 @@ void main() {
     });
   });
 
+  group('reading FuelWise off the phone', () {
+    // The provider hands over a reduced payload — vehicles plus each
+    // fill-up's odometer and date, and nothing else. Upkeep must read that
+    // exactly as happily as the full file.
+    const String minimal =
+        '{"vehicles":[{"id":"v1","name":"RAV4","year":2019,"make":"Toyota"}],'
+        '"fillups":[{"vehicleId":"v1","date":"2026-01-01T00:00:00.000",'
+        '"odometer":40000},{"vehicleId":"v1",'
+        '"date":"2026-01-15T00:00:00.000","odometer":40450}]}';
+
+    test('the reduced payload parses like the full one', () {
+      final FuelWiseResult r = FuelWise.parseOrError(minimal);
+      expect(r.ok, isTrue);
+      expect(r.snapshot!.vehicles.single.label, 'RAV4 · 2019 Toyota');
+      expect(r.snapshot!.forVehicle('v1').length, 2);
+    });
+
+    test('it imports and drives the pace the same way', () {
+      final Asset a = Asset(id: 'a', name: 'RAV4', unit: 'mi');
+      final FuelWiseResult r = FuelWise.parseOrError(minimal);
+      expect(importFills(a, r.snapshot!.forVehicle('v1')).added, 2);
+      expect(a.latestReading!.value, 40450);
+    });
+
+    test('no GPS or cost fields are required to be present', () {
+      // The provider strips trips, drives, gallons, price and stations.
+      // Their absence must not weaken anything Upkeep does.
+      expect(minimal.contains('gallons'), isFalse);
+      expect(minimal.contains('drives'), isFalse);
+      final FuelWiseResult r = FuelWise.parseOrError(minimal);
+      expect(r.ok, isTrue);
+    });
+
+    test('each on-device failure says what to do about it', () {
+      for (final FuelWiseError e in <FuelWiseError>[
+        FuelWiseError.fuelwiseNotFound,
+        FuelWiseError.fuelwiseTooOld,
+        FuelWiseError.fuelwiseEmpty,
+      ]) {
+        expect(fuelWiseErrorText(e), isNotEmpty);
+      }
+      // The fix for "missing" and "too old" is the same, and the message
+      // has to name the version that actually has the provider.
+      expect(fuelWiseErrorText(FuelWiseError.fuelwiseNotFound),
+          contains('0.21.0'));
+      expect(
+          fuelWiseErrorText(FuelWiseError.fuelwiseTooOld), contains('0.21.0'));
+    });
+  });
+
   group('importing fill-ups', () {
     Asset car() => Asset(id: 'a', name: 'RAV4', unit: 'mi');
 
